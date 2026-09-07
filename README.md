@@ -121,6 +121,23 @@ attacker already owns every file `harness` could read), so the practical impact 
 anyway," not a security boundary violation. Reassess if this tool is ever run against
 another user's data or over a shared/network filesystem.
 
+## Known limitation: Windows symlink race, and unbounded single-line memory use (accepted, not fixed)
+
+Two more findings from code review, deliberately accepted rather than fixed for this MVP:
+
+- **Windows symlink race.** `transcripts._open_transcript_atomically`'s `O_NOFOLLOW` protection
+  is POSIX-only (`getattr(os, "O_NOFOLLOW", 0)` silently becomes a no-op where the flag doesn't
+  exist). On Windows, a `*.jsonl` path could in principle be swapped for a symlink between
+  discovery's `is_symlink()` check and the open, and get read anyway. Accepted because this
+  ecosystem's tooling (see `AGENTS.md`'s "VS Code Extension Debugging" and every other repo's
+  conventions) is macOS-only in practice; revisit if this tool is ever run on Windows.
+- **Unbounded single-line memory use.** Each `.jsonl` line is read and `json.loads`-parsed with
+  no size cap. A pathological single line (a multi-GB unterminated line, or a huge string field)
+  would force a large allocation and could raise `MemoryError`, uncaught. Accepted because the
+  input is the SAME local user's own Claude Code transcripts, not untrusted network input, and
+  real transcript lines are at most a few KB; a size cap is a reasonable follow-up if this tool
+  is ever pointed at transcripts it doesn't already trust the size of.
+
 ## Architecture
 
 - `harness_cli/discovery.py` — locates account config dirs and transcript files.
@@ -151,6 +168,8 @@ Claude-Code-specific today).
   output). Per-record windowing (summing only the usage lines whose own timestamp falls inside
   the window) would give a tighter number but adds real complexity - deferred rather than
   guessed at silently.
+- Windows symlink-race hardening and a per-line size cap — see the "Known limitation" section
+  above for why each is accepted rather than fixed here.
 - Not published to PyPI, not installed system-wide; not pushed to a GitHub remote (see below).
 
 ## Status
