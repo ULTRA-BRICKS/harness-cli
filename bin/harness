@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""harness — entry point for harness-cli.
+
+Thin shim: put the repo root on sys.path (so `harness_cli` imports from a source checkout
+with no install step) and hand off to the CLI. Stdlib-only here, matching harness_cli/cli.py.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# this file is <repo>/bin/harness; the repo root is <repo>/, which holds harness_cli/.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from harness_cli.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())
