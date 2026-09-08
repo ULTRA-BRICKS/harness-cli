@@ -34,10 +34,8 @@ def _open_transcript_atomically(path: Path) -> io.TextIOWrapper:
     gets read is provably the same regular file that was just opened, never whatever a
     concurrent process swapped the name to point at afterward.
     """
-    try:
-        fd = os.open(path, _OPEN_FLAGS)
-    except OSError:
-        raise  # vanished, permission denied, or (via O_NOFOLLOW) actually a symlink
+    # vanished, permission denied, or (via O_NOFOLLOW) actually a symlink
+    fd = os.open(path, _OPEN_FLAGS)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise OSError(f"not a regular file: {path}")

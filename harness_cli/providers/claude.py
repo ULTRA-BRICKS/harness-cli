@@ -258,7 +258,7 @@ def _detect_claude_version() -> str:
         names = []
     dotted = [name for name in names if name and name[0].isdigit()]
     if dotted:
-        return sorted(dotted)[-1]
+        return max(dotted)
     return "2.1.263"
 
 
@@ -462,7 +462,7 @@ def collect_claude(home: Path | None = None, *, current_only: bool = False) -> l
             else:
                 err = rerr or err
         if windows is None:
-            status = "http_error" if err and "HTTP" in err else "http_error"
+            status = "http_error"
             cards.append(_fail_card(account, plan, err or "unavailable", status))
             continue
         cards.append(_live_card(account, plan, windows))

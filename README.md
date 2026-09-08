@@ -31,6 +31,8 @@ harness search QUERY [--days N]
 harness task new --title TITLE [--body BODY]
 harness task list [--all] [--json]
 harness task done ID
+harness agents [--json] [--all]
+harness agents web [--host H] [--port N] [--no-open]
 ```
 
 - `--all` — every known account/provider on this machine (Claude Code slots,
@@ -44,6 +46,13 @@ harness task done ID
   (`QUERY` is a case-insensitive substring; `--days` defaults to 3, `0` disables).
 - `task` is the local process-ticket tracker for agent/session work; it writes JSON under
   `$HARNESS_TASK_DIR` (else XDG/state) and never files a GitHub issue.
+- `agents` lists OMP and Claude Code parent + nested sessions, pending tg-ctl questions,
+  and open harness tasks. Default age window is 24 hours (`--all` disables it and includes
+  done tasks). Live vs parked is an mtime heuristic (under 10 minutes is live), never a
+  process-liveness API. `agents web` serves a local page at http://127.0.0.1:7888
+  (`--port 0` binds ephemeral; `--no-open` skips the browser) with links to the review
+  dashboard (7878), spec-web (7920), rig config-web (8787), rig evolve (8797), and 3d web
+  (8733).
 
 ## Data sources (real % only)
 
@@ -68,6 +77,8 @@ On macOS the Keychain token is preferred when `~/.claude/.credentials.json` is s
 - `harness_cli/providers/` — `claude.py`, `codex.py`, `zai.py`, `xai.py`, `kimi.py`.
 - `harness_cli/search.py` — parent-session user-message search (CC + OMP).
 - `harness_cli/tasks.py` — local process-ticket store (not GitHub).
+- `harness_cli/agents.py` — landscape collectors (OMP/CC agents, tg-ctl questions, tasks).
+- `harness_cli/agents_web.py` — local live landscape web view (ThreadingHTTPServer + SSE).
 - Stdlib only (no rich). Unicode bars (`█` / `░`). ANSI green below 90%, red at
   ≥90%. Honors `NO_COLOR` / `FORCE_COLOR` / isatty.
 
