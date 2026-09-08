@@ -240,7 +240,7 @@ def run(args: argparse.Namespace) -> int:
     port = int(getattr(args, "port", DEFAULT_PORT))
     httpd = make_server(host, port)
     bound = httpd.server_address[1]
-    url = "http://%s:%s/" % (host, bound)
+    url = f"http://{host}:{bound}/"
     print(url)
     if not getattr(args, "no_open", False):
         webbrowser.open(url)

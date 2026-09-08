@@ -30,7 +30,7 @@ def _isolate(tmp_path, monkeypatch):
 def _get(port, path, host=None, timeout=5):
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     try:
-        headers = {"Host": host or ("127.0.0.1:%s" % port)}
+        headers = {"Host": host or f"127.0.0.1:{port}"}
         conn.request("GET", path, headers=headers)
         resp = conn.getresponse()
         body = resp.read()
@@ -137,7 +137,7 @@ def test_web_host_allowlist_and_unknown_path(tmp_path, monkeypatch):
         httpd, thread, port = _start_server()
         status, _ctype, _body = _get(port, "/api/health", host="evil.example.com")
         assert status == 403
-        status, _ctype, _body = _get(port, "/api/health", host="127.0.0.1:%s" % port)
+        status, _ctype, _body = _get(port, "/api/health", host=f"127.0.0.1:{port}")
         assert status == 200
         status, _ctype, _body = _get(port, "/no-such-route")
         assert status == 404
@@ -155,7 +155,7 @@ def test_web_sse_events_stream(tmp_path, monkeypatch):
     try:
         httpd, thread, port = _start_server()
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        conn.request("GET", "/events", headers={"Host": "127.0.0.1:%s" % port})
+        conn.request("GET", "/events", headers={"Host": f"127.0.0.1:{port}"})
         resp = conn.getresponse()
         assert resp.status == 200
         ctype = resp.getheader("Content-Type") or ""
