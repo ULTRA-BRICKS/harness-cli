@@ -1,11 +1,9 @@
-"""harness-cli: observed usage/limit signals for local agent harnesses.
+"""harness-cli: real rate-limit proximity for local agent harness accounts.
 
-MVP scope (see README.md "What this does NOT do" for the honest ceiling):
-reads Claude Code's own local session transcripts (the same `~/.claude/projects/**/*.jsonl`
-/ `~/.claude-accounts/account-*/projects/**/*.jsonl` files Claude Code itself writes) and
-reports OBSERVED token/message counts and OBSERVED api-error events (rate-limit / session-limit
-/ overloaded / auth messages Claude Code already recorded). It does not predict time-to-reset or
-percent-of-window-remaining — no stable, documented API exposes that today.
+`harness limits` queries each provider's usage API (Claude Code OAuth usage,
+Codex wham/usage, z.ai quota/limit, kimi coding usages) and renders percent-used
+bars, reset countdowns, and pace. Percents are never guessed from local
+transcript token counts. Transcript modules remain for other commands.
 """
 
 __version__ = "0.2.0"
