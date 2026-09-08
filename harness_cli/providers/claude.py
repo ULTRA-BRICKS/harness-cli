@@ -66,32 +66,77 @@ def _ordered_window_keys(payload: dict) -> list[str]:
     return keys
 
 
+def _finite_percent(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0 or value > 100:
+        return None
+    return float(value)
+
+
+def _window_from_fields(
+    name: str, percent: object, resets_raw: object, window_seconds: float | None
+) -> LimitWindow | None:
+    used = _finite_percent(percent)
+    if used is None:
+        return None
+    resets_at = parse_iso_timestamp(resets_raw) if isinstance(resets_raw, str) else None
+    return LimitWindow(
+        name=name, used_percent=used, resets_at=resets_at, window_seconds=window_seconds
+    )
+
+
+def _windows_from_limits_array(payload: dict) -> list[LimitWindow]:
+    """Screenshot windows live in `limits[]` (Session / Weekly / Weekly·Fable)."""
+    raw = payload.get("limits")
+    if not isinstance(raw, list):
+        return []
+    windows: list[LimitWindow] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("kind")
+        percent = item.get("percent")
+        resets_raw = item.get("resets_at")
+        if kind == "session":
+            win = _window_from_fields("Session", percent, resets_raw, _FIVE_HOUR)
+        elif kind == "weekly_all":
+            win = _window_from_fields("Weekly", percent, resets_raw, _SEVEN_DAY)
+        elif kind == "weekly_scoped":
+            scope = item.get("scope") if isinstance(item.get("scope"), dict) else {}
+            model = scope.get("model") if isinstance(scope.get("model"), dict) else {}
+            display = model.get("display_name")
+            if not isinstance(display, str) or not display.strip():
+                continue
+            win = _window_from_fields(
+                f"Weekly·{display.strip()}", percent, resets_raw, _SEVEN_DAY
+            )
+        else:
+            continue
+        if win is not None:
+            windows.append(win)
+    return windows
+
+
 def parse_oauth_usage(payload: object) -> list[LimitWindow]:
     if not isinstance(payload, dict):
         return []
+    from_limits = _windows_from_limits_array(payload)
+    if from_limits:
+        return from_limits
     windows: list[LimitWindow] = []
     for key in _ordered_window_keys(payload):
         raw = payload[key]
         if raw is None or not isinstance(raw, dict):
             continue
-        util = raw.get("utilization")
-        if isinstance(util, bool) or not isinstance(util, (int, float)):
-            continue
-        if not math.isfinite(util) or util < 0 or util > 100:
-            continue
         label = window_label(key)
         if not label:
             continue
-        resets_raw = raw.get("resets_at")
-        resets_at = parse_iso_timestamp(resets_raw) if isinstance(resets_raw, str) else None
-        windows.append(
-            LimitWindow(
-                name=label,
-                used_percent=float(util),
-                resets_at=resets_at,
-                window_seconds=window_seconds_for(key),
-            )
+        win = _window_from_fields(
+            label, raw.get("utilization"), raw.get("resets_at"), window_seconds_for(key)
         )
+        if win is not None:
+            windows.append(win)
     return windows
 
 
@@ -322,16 +367,30 @@ def _live_card(account: str, plan: str | None, windows: list[LimitWindow]) -> Li
     )
 
 
+def _pick_freshest_creds(*candidates: dict | None) -> dict | None:
+    """Prefer an unexpired token; on macOS the Keychain copy is the live one."""
+    unexpired = [c for c in candidates if c and not _token_expired(c.get("expires_at"))]
+    if unexpired:
+        return unexpired[0]
+    for candidate in candidates:
+        if candidate:
+            return candidate
+    return None
+
+
 def _creds_for_slot(config_dir: Path, home: Path) -> dict | None:
-    creds = read_file_credentials(config_dir)
-    if creds:
-        return creds
-    if config_dir.resolve() != current_config_dir(home).resolve():
-        return None
-    keyed = read_keychain_credentials()
-    if keyed:
-        return keyed
-    return _env_credentials()
+    file_creds = read_file_credentials(config_dir)
+    keyed = None
+    env_creds = None
+    try:
+        is_current = config_dir.resolve() == current_config_dir(home).resolve()
+    except OSError:
+        is_current = False
+    if is_current:
+        keyed = read_keychain_credentials()
+        env_creds = _env_credentials()
+    # Keychain first: ~/.claude/.credentials.json is often stale while Keychain is live.
+    return _pick_freshest_creds(keyed, file_creds, env_creds)
 
 
 def _group_slots(home: Path) -> list[tuple[str, str | None, Path, dict | None]]:
