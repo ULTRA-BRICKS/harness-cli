@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harness-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Observed token/message/api-error signals from local agent harness transcripts (starting with Claude Code), so other tools (review-cli, tg-cli, pm-cli) can pace concurrency instead of guessing blind."
 readme = "README.md"
 requires-python = ">=3.9"

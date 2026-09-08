@@ -223,3 +223,46 @@ def find_transcripts(config_dir: Path, modified_after: float | None = None) -> l
                 continue
         out.append(path)
     return out
+
+
+def omp_sessions_root(home: Path | None = None) -> Path:
+    """Oh My Pi parent-session root: ~/.omp/agent/sessions."""
+    home = home or default_home()
+    return home / ".omp" / "agent" / "sessions"
+
+
+def find_parent_session_files(
+    sessions_root: Path, modified_after: float | None = None
+) -> list[Path]:
+    """jsonl files whose parent dir is a direct child of `sessions_root`.
+
+    Parent sessions live at `{sessions_root}/{slug}/{session}.jsonl`. Nested files
+    (CC `subagents/`, OMP `{session}/{AgentName}.jsonl`) are not parent sessions.
+    `modified_after` is an optional cheap mtime pre-filter; callers still filter
+    by each message's own timestamp.
+    """
+    if not _safe_is_real_dir(sessions_root):
+        return []
+    try:
+        slugs = list(sessions_root.iterdir())
+    except OSError:
+        return []
+    out: list[Path] = []
+    for slug_dir in slugs:
+        if not _safe_is_real_dir(slug_dir):
+            continue
+        try:
+            entries = list(slug_dir.iterdir())
+        except OSError:
+            continue
+        for candidate in entries:
+            if not candidate.name.endswith(".jsonl"):
+                continue
+            if not _safe_is_regular_file(candidate):
+                continue
+            if modified_after is not None:
+                mtime = _safe_mtime(candidate)
+                if mtime is None or mtime < modified_after:
+                    continue
+            out.append(candidate)
+    return out
