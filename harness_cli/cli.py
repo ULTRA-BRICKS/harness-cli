@@ -1,7 +1,7 @@
 """harness — observed usage/limit signals for local agent harnesses.
 
 Argparse + dispatch only; behavior lives in the sibling modules (discovery, transcripts,
-report). Stdlib-only at import time so `harness --help` never needs a dependency.
+report, search, tasks). Stdlib-only at import time so `harness --help` never needs a dependency.
 """
 
 from __future__ import annotations
@@ -42,6 +42,26 @@ def _window_hours(value: str) -> float:
 def _days(value: str) -> float:
     """argparse type for --days: same finite non-negative idea as --window-hours."""
     return _finite_non_negative(value, "--days", _MAX_DAYS)
+
+
+def _add_task_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    task = sub.add_parser(
+        "task",
+        help="Local process-ticket tracker (not GitHub issues).",
+        description=(
+            "Create, list, and close local process tickets. Never files a GitHub issue."
+        ),
+    )
+    task_sub = task.add_subparsers(dest="task_command")
+    created = task_sub.add_parser("new", help="Create a local process ticket.")
+    created.add_argument("--title", required=True, help="Ticket title.")
+    created.add_argument("--body", default="", help="Optional ticket body.")
+    listed = task_sub.add_parser("list", help="List local process tickets.")
+    listed.add_argument("--all", action="store_true", help="Include done tickets.")
+    listed.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
+    done = task_sub.add_parser("done", help="Mark a local process ticket done.")
+    done.add_argument("ticket_id", type=int, metavar="ID", help="Ticket id.")
+    return task
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -89,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
         "0 disables the filter.",
     )
 
+    parser.task_parser = _add_task_parser(sub)
     return parser
 
 
@@ -104,6 +125,11 @@ def main(argv: list[str] | None = None) -> int:
         return _run_limits(args)
     if args.command == "search":
         return _run_search(args)
+    if args.command == "task":
+        if getattr(args, "task_command", None) is None:
+            parser.task_parser.print_help()
+            return 0
+        return _run_task(args)
 
     parser.print_help()
     return 1
@@ -154,6 +180,14 @@ def _run_search(args: argparse.Namespace) -> int:
 
     print(render_hits(search_user_messages(args.query, args.days)))
     return 0
+
+
+def _run_task(args: argparse.Namespace) -> int:
+    # Imported lazily: keep `harness --help` / `harness --version` on the stdlib-only
+    # fast path, matching _run_limits / _run_search.
+    from harness_cli.tasks import run
+
+    return run(args)
 
 
 def _run_limits(args: argparse.Namespace) -> int:

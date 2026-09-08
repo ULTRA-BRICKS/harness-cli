@@ -8,4 +8,4 @@ reports OBSERVED token/message counts and OBSERVED api-error events (rate-limit 
 percent-of-window-remaining — no stable, documented API exposes that today.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
