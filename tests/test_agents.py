@@ -231,3 +231,49 @@ def test_agents_states_window_and_heuristic(tmp_path, monkeypatch, capsys):
     assert "24" in out
     assert "parked" in out
     assert "live" in out
+
+
+def test_agents_json_redacts_authorization_bearer_secret(tmp_path, monkeypatch, capsys):
+    _isolate(tmp_path, monkeypatch)
+    path = tmp_path / ".omp" / "agent" / "sessions" / "-proj" / "sess.jsonl"
+    _write_jsonl(
+        path,
+        [_text_entry("omp", "curl with Authorization: Bearer sk-test-secret in the body")],
+    )
+
+    rc = cli.main(["agents", "--json"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "Authorization: Bearer sk-test-secret" not in out
+    assert "sk-test-secret" not in out
+    data = json.loads(out)
+    texts = [row.get("last_text", "") for row in data["agents"]]
+    assert any("curl with" in text for text in texts)
+
+
+def test_last_text_cache_skips_reread_when_mtime_unchanged(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    path = tmp_path / ".omp" / "agent" / "sessions" / "-proj" / "cached.jsonl"
+    _write_jsonl(path, [_text_entry("omp", "cached snippet")])
+
+    from harness_cli import agents
+
+    opens = {"n": 0}
+    real_open = agents._open_transcript_atomically
+
+    def counting_open(target):
+        opens["n"] += 1
+        return real_open(target)
+
+    monkeypatch.setattr(agents, "_open_transcript_atomically", counting_open)
+    first = agents._last_text(path)
+    second = agents._last_text(path)
+    assert first == "cached snippet"
+    assert second == first
+    assert opens["n"] == 1
+
+    _write_jsonl(path, [_text_entry("omp", "updated snippet")])
+    third = agents._last_text(path)
+    assert third == "updated snippet"
+    assert opens["n"] == 2

@@ -8,8 +8,11 @@ Assumptions: never walks a real developer HOME in tests (callers monkeypatch HOM
 and HARNESS_* dirs). Live vs parked is an mtime heuristic (under 10 minutes is
 live), never a process-liveness API. Missing or corrupt question files yield an
 empty list, not an error. `req.toolInput` is never copied into the landscape.
+`last_text` is redacted before assignment (Authorization headers, Bearer/OAuth,
+sk-/ghp-/xox-like tokens); redact failure yields empty text, never the original.
 
-Past bugs: none yet — new command.
+Past bugs: `_sanitize` only stripped controls, so a pasted `Authorization: Bearer`
+snippet leaked through `harness agents --json`, HTML, and SSE.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,6 +43,17 @@ _QUESTION_REQ_FIELDS = (
     "cwd",
     "subagent",
 )
+_SECRET_RES = (
+    re.compile(r"(?i)authorization\s*:\s*\S+(?:\s+\S+)?"),
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-+=/]+"),
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{4,}"),
+    re.compile(r"\bghp_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
+    re.compile(r"\bxox[a-zA-Z]?-[A-Za-z0-9-]{8,}"),
+    re.compile(r"\bglpat-[A-Za-z0-9_\-]{10,}"),
+    re.compile(r"\beyJ[A-Za-z0-9_\-]+=*\.[A-Za-z0-9_\-]+=*\.[A-Za-z0-9_\-]+=*"),
+)
+_last_text_cache: dict[tuple[str, float], str] = {}
 
 
 def questions_dir() -> Path:
@@ -78,7 +93,14 @@ def _entry_text(entry: dict) -> str | None:
     return "".join(texts) or None
 
 
-def _last_text(path: Path) -> str:
+def _redact_secrets(text: str) -> str:
+    redacted = text
+    for pattern in _SECRET_RES:
+        redacted = pattern.sub("[redacted]", redacted)
+    return redacted
+
+
+def _read_last_snippet(path: Path) -> str:
     snippet = ""
     try:
         with _open_transcript_atomically(path) as fh:
@@ -97,9 +119,33 @@ def _last_text(path: Path) -> str:
                     snippet = text
     except OSError:
         return ""
+    return snippet
+
+
+def _finish_last_text(snippet: str) -> str:
     cleaned = " ".join(_sanitize(snippet).split())
+    cleaned = _redact_secrets(cleaned)
     if len(cleaned) > LAST_TEXT_MAX:
         return cleaned[: LAST_TEXT_MAX - 1] + "…"
+    return cleaned
+
+
+def _last_text(path: Path) -> str:
+    mtime = discovery._safe_mtime(path)
+    if mtime is None:
+        return ""
+    key = (str(path), mtime)
+    cached = _last_text_cache.get(key)
+    if cached is not None:
+        return cached
+    try:
+        cleaned = _finish_last_text(_read_last_snippet(path))
+    except (TypeError, ValueError, re.error):
+        cleaned = ""
+    stale = [old for old in _last_text_cache if old[0] == key[0] and old != key]
+    for old in stale:
+        del _last_text_cache[old]
+    _last_text_cache[key] = cleaned
     return cleaned
 
 

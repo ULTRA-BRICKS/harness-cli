@@ -5,10 +5,11 @@ ThreadingHTTPServer (default 127.0.0.1:7888). `--port 0` is ephemeral.
 
 Assumptions: loopback by default; Host allowlist is localhost / 127.0.0.1 / ::1.
 Reads only — no path traversal, no writes. Peer probes use a short TCP timeout
-and never block listing when a peer is down. HTML is sanitized.
+and never block listing when a peer is down. HTML is sanitized. The page
+subscribes to EventSource("/events") and replaces list bodies from SSE JSON.
 
-Past bugs: none yet — new command. Port 7878 is the review dashboard, so this
-view defaults to 7888.
+Past bugs: HTML was a static snapshot even though `/events` existed, so an
+open tab never updated. last_text caching lives in `agents._last_text`.
 """
 
 from __future__ import annotations
@@ -137,6 +138,26 @@ def _section(rows: list, formatter) -> str:
     return "".join(formatter(row) for row in rows)
 
 
+def _live_script() -> str:
+    return (
+        "<script>(function(){"
+        "var es=new EventSource('/events');"
+        "function esc(v){return String(v==null?'':v).replace(/[&<>\"']/g,function(c){"
+        "return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c];});}"
+        "function fill(id,rows,fmt){var el=document.getElementById(id);if(!el)return;"
+        "if(!rows||!rows.length){el.innerHTML='<li>(none)</li>';return;}"
+        "el.innerHTML=rows.map(fmt).join('');}"
+        "es.onmessage=function(ev){var data;try{data=JSON.parse(ev.data);}catch(err){return;}"
+        "fill('agents',data.agents,function(r){return '<li>'+esc(r.status)+' '+esc(r.harness)"
+        "+' '+esc(r.kind)+' '+esc(r.name)+' — '+esc(r.last_text||'')+'</li>';});"
+        "fill('questions',data.questions,function(r){return '<li>'+esc(r.agent||'')+' '"
+        "+esc(r.question||r.title||'')+'</li>';});"
+        "fill('tasks',data.tasks,function(r){return '<li>'+esc(r.id)+' '+esc(r.state)+' '"
+        "+esc(r.title)+'</li>';});};"
+        "})();</script>"
+    )
+
+
 def render_html(data: dict) -> str:
     nav_parts = []
     for peer in PEERS:
@@ -151,9 +172,12 @@ def render_html(data: dict) -> str:
         "nav a{margin-right:1rem}</style></head><body>",
         "<h1>harness agents</h1>",
         "<nav>" + nav + "</nav>",
-        "<h2>Agents</h2><ul>" + _section(data.get("agents") or [], _agent_li) + "</ul>",
-        "<h2>Questions</h2><ul>" + _section(data.get("questions") or [], _question_li) + "</ul>",
-        "<h2>Tasks</h2><ul>" + _section(data.get("tasks") or [], _task_li) + "</ul>",
+        "<h2>Agents</h2><ul id=\"agents\">" + _section(data.get("agents") or [], _agent_li) + "</ul>",
+        "<h2>Questions</h2><ul id=\"questions\">"
+        + _section(data.get("questions") or [], _question_li)
+        + "</ul>",
+        "<h2>Tasks</h2><ul id=\"tasks\">" + _section(data.get("tasks") or [], _task_li) + "</ul>",
+        _live_script(),
         "</body></html>",
     ]
     return "".join(chunks)

@@ -175,6 +175,21 @@ def test_web_sse_events_stream(tmp_path, monkeypatch):
         if httpd is not None:
             _stop_server(httpd, thread)
 
+def test_web_html_contains_eventsource_and_events(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    httpd = thread = None
+    try:
+        httpd, thread, port = _start_server()
+        status, _ctype, raw = _get(port, "/")
+        html = raw.decode("utf-8")
+        assert status == 200
+        assert "EventSource" in html
+        assert "/events" in html
+    finally:
+        if httpd is not None:
+            _stop_server(httpd, thread)
+
+
 def test_request_allowed_rejects_spoofed_host_and_non_loopback_client():
     from harness_cli.agents_web import request_allowed
 
