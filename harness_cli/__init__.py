@@ -6,4 +6,4 @@ bars, reset countdowns, and pace. Percents are never guessed from local
 transcript token counts. Transcript modules remain for other commands.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

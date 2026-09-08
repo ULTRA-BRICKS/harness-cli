@@ -64,6 +64,37 @@ def _add_task_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser
     return task
 
 
+def _add_agents_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    agents = sub.add_parser(
+        "agents",
+        help="List live/parked local agents, pending questions, and harness tasks.",
+        description=(
+            "Disk-only landscape of OMP and Claude Code sessions, tg-ctl questions, "
+            "and local harness tasks. Live vs parked uses mtime (under 10 minutes is live)."
+        ),
+    )
+    agents.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
+    agents.add_argument(
+        "--all",
+        action="store_true",
+        help="Disable the 24-hour age window and include done tasks.",
+    )
+    agents_sub = agents.add_subparsers(dest="agents_command")
+    web = agents_sub.add_parser(
+        "web",
+        help="Serve a live landscape page (default http://127.0.0.1:7888).",
+    )
+    web.add_argument("--host", default="127.0.0.1", help="Bind host (default 127.0.0.1).")
+    web.add_argument(
+        "--port",
+        type=int,
+        default=7888,
+        help="Bind port (default 7888; 0 = ephemeral).",
+    )
+    web.add_argument("--no-open", action="store_true", help="Do not open a browser.")
+    return agents
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness",
@@ -122,6 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.task_parser = _add_task_parser(sub)
+    parser.agents_parser = _add_agents_parser(sub)
     return parser
 
 
@@ -142,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.task_parser.print_help()
             return 0
         return _run_task(args)
+    if args.command == "agents":
+        return _run_agents(args)
 
     parser.print_help()
     return 1
@@ -160,6 +194,18 @@ def _run_task(args: argparse.Namespace) -> int:
     # Imported lazily: keep `harness --help` / `harness --version` on the stdlib-only
     # fast path, matching _run_limits / _run_search.
     from harness_cli.tasks import run
+
+    return run(args)
+
+
+def _run_agents(args: argparse.Namespace) -> int:
+    # Imported lazily: keep `harness --help` / `harness --version` on the stdlib-only
+    # fast path, matching _run_limits / _run_search / _run_task.
+    if getattr(args, "agents_command", None) == "web":
+        from harness_cli.agents_web import run as run_web
+
+        return run_web(args)
+    from harness_cli.agents import run
 
     return run(args)
 
