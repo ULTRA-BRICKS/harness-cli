@@ -4,17 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harness-cli"
-version = "0.2.0"
-description = "Observed token/message/api-error signals from local agent harness transcripts (starting with Claude Code), so other tools (review-cli, tg-cli, pm-cli) can pace concurrency instead of guessing blind."
+version = "0.3.0"
+description = "Real rate-limit proximity (percent used, reset, pace) for Claude Code, Codex, z.ai, x.ai, and kimi accounts on this machine."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Alex Mextner" }]
 keywords = ["cli", "claude-code", "rate-limit", "usage", "agent-tools"]
 
-# Zero required runtime deps: reads local JSONL with stdlib json, discovers files with
-# stdlib pathlib. No API key, no network call, matching how Claude Code's own transcripts
-# are already stored on disk.
+# Zero required runtime deps: stdlib urllib + json. Usage percents come from each
+# provider's usage API; missing creds/endpoints fail closed rather than guessing.
 dependencies = []
 
 [project.optional-dependencies]

@@ -1,7 +1,8 @@
-"""harness — observed usage/limit signals for local agent harnesses.
+"""harness — rate-limit proximity for local agent harness accounts.
 
-Argparse + dispatch only; behavior lives in the sibling modules (discovery, transcripts,
-report, search, tasks). Stdlib-only at import time so `harness --help` never needs a dependency.
+Argparse + dispatch only; behavior lives in sibling modules (limits, search, tasks).
+Stdlib-only at import time so `harness --help` never needs a dependency. Network
+collectors are lazy-imported inside `_run_limits`.
 """
 
 from __future__ import annotations
@@ -9,7 +10,6 @@ from __future__ import annotations
 import argparse
 import math
 import sys
-import time
 
 from harness_cli import __version__
 
@@ -68,30 +68,42 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness",
         description=(
-            "Observed token/message/api-error signals from local agent harness transcripts. "
-            "Currently supports Claude Code; other harnesses (opencode/omp/codex) can add "
-            "their own source module later (see harness_cli/transcripts.py)."
+            "Show real rate-limit proximity (percent used, reset countdown, pace) "
+            "for Claude Code, Codex, z.ai, x.ai, and kimi accounts on this machine. "
+            "Percents come from each provider's usage API — never from local "
+            "transcript token counts."
         ),
     )
     parser.add_argument("--version", action="version", version=f"harness-cli {__version__}")
     sub = parser.add_subparsers(dest="command")
 
-    limits = sub.add_parser("limits", help="Report observed usage for Claude Code sessions.")
+    limits = sub.add_parser(
+        "limits",
+        help="Show real rate-limit proximity per account (not transcript token tables).",
+    )
     scope = limits.add_mutually_exclusive_group(required=True)
     scope.add_argument(
-        "--current", action="store_true", help="Just the current session's own transcript."
+        "--current",
+        action="store_true",
+        help="Proximity for the current Claude Code account (same renderer as --all).",
     )
     scope.add_argument(
-        "--all", action="store_true", help="Every known account/session on this machine."
+        "--all",
+        action="store_true",
+        help="Every known account/provider on this machine.",
     )
     limits.add_argument(
         "--window-hours",
         type=_window_hours,
         default=5.0,
-        help="For --all: only scan transcripts modified within this many hours (default: 5, "
-        "matching Claude Code's rolling session window). 0 disables the filter.",
+        help="Accepted for compatibility; does not compute or fake a percent for --all. "
+        "Must be a finite number in [0, 8760000].",
     )
-    limits.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
+    limits.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the proximity model (cards + windows) as JSON.",
+    )
 
     search = sub.add_parser(
         "search",
@@ -135,44 +147,6 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-def _scan_all_sessions(discovery, parse_transcript, window_hours: float) -> list:
-    """Scan every account for transcripts, filtered to the window by REAL content time.
-
-    File mtime is used as a cheap pre-filter (skip files untouched in the window before
-    paying to parse them), then each session's actual last_timestamp is re-checked after
-    parsing and anything still stale is dropped - this catches the observed case of a
-    fresh mtime with stale content (some external process touching the file without
-    appending). It does NOT catch the inverse (stale mtime, fresh content - possible if
-    something rewrites a file's bytes while preserving its old mtime, e.g. certain backup
-    restores); that's a known, accepted gap of the mtime pre-filter, documented in
-    README.md, not silently claimed away.
-    """
-    from datetime import datetime, timedelta, timezone
-
-    from harness_cli.timeutil import parse_iso_timestamp
-
-    sessions = []
-    modified_after = None
-    cutoff = None
-    if window_hours > 0:
-        modified_after = time.time() - window_hours * 3600
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
-
-    for config_dir in discovery.discover_account_dirs():
-        account = discovery.account_label(config_dir)
-        for path in discovery.find_transcripts(config_dir, modified_after=modified_after):
-            try:
-                session = parse_transcript(path, account)
-            except OSError:
-                continue
-            if cutoff is not None:
-                last_seen = parse_iso_timestamp(session.last_timestamp)
-                if last_seen is not None and last_seen < cutoff:
-                    continue
-            sessions.append(session)
-    return sessions
-
-
 def _run_search(args: argparse.Namespace) -> int:
     # Imported lazily: keep `harness --help` / `harness --version` on the stdlib-only
     # fast path, matching _run_limits.
@@ -191,36 +165,20 @@ def _run_task(args: argparse.Namespace) -> int:
 
 
 def _run_limits(args: argparse.Namespace) -> int:
-    # Imported lazily: only `limits` needs the transcript-scanning modules, keeping
-    # `harness --help` / `harness --version` on the stdlib-only fast path.
-    from harness_cli import discovery, report
-    from harness_cli.transcripts import parse_transcript
+    # Imported lazily: network collectors stay off the `harness --help` /
+    # `harness --version` stdlib-only fast path.
+    from harness_cli import limits_collect, limits_render
 
     if args.current:
-        path, how = discovery.find_current_transcript()
-        session = None
-        if path is not None:
-            config_dir = discovery.current_config_dir()
-            account = discovery.account_label(config_dir)
-            try:
-                session = parse_transcript(path, account)
-            except OSError:
-                # Resolved a path, but it vanished/rotated before we could open it - same
-                # race the --all path already tolerates. Report "no transcript", not crash.
-                how = f"{how} (transcript vanished before it could be read)"
-        if args.json:
-            print(report.current_to_json(session, how))
-        else:
-            print(report.render_current(session, how, args.window_hours))
-        return 0 if session is not None else 1
-
-    # --all
-    sessions = _scan_all_sessions(discovery, parse_transcript, args.window_hours)
+        cards = limits_collect.collect_current()
+    else:
+        cards = limits_collect.collect_all()
 
     if args.json:
-        print(report.sessions_to_json(sessions))
+        print(limits_render.cards_to_json(cards))
     else:
-        print(report.render_all(sessions, args.window_hours))
+        color = limits_render.color_enabled(sys.stdout)
+        print(limits_render.render_cards(cards, color=color))
     return 0
 
 
