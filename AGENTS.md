@@ -21,7 +21,7 @@ others), and the known mtime-pre-filter limitation.
   timestamps/counts. A missing field is `0`/`unknown`, never estimated.
 - **Stdlib-only at import time.** `harness_cli/cli.py`'s `build_parser()` and module import
   must succeed with zero third-party imports, so `harness --help` / `harness --version` never
-  need a dependency. Heavy work (transcript scanning) is imported lazily inside `_run_limits`.
+  need a dependency. Heavy work (transcript scanning / search) is imported lazily inside `_run_limits` / `_run_search`.
 - **Every fallback states its reason.** `discovery.find_current_transcript` returns a `how`
   string explaining which resolution path was actually used (direct session-id match vs.
   most-recently-modified fallback) — never a silent guess.

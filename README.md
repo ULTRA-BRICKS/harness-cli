@@ -71,6 +71,7 @@ last hit one, with a real wall-clock hint when the message provides one) — not
 ```
 harness limits --current [--json]
 harness limits --all [--window-hours N] [--json]
+harness search QUERY [--days N]
 ```
 
 - `--current` resolves and reads **this session's own transcript** (via `$CLAUDE_CONFIG_DIR` +
@@ -80,6 +81,9 @@ harness limits --all [--window-hours N] [--json]
   every project under it, aggregating token/message/error counts per account.
   `--window-hours` (default 5, matching Claude Code's rolling session window) skips transcript
   files whose mtime is older than the window, as a cheap pre-filter before parsing.
+- `search` finds user messages in Claude Code and Oh My Pi *parent* session transcripts
+  (`QUERY` is a case-insensitive substring; `--days` defaults to 3, `0` disables). Nested
+  subagent jsonl, tool-result turns, and OMP `attribution=agent` briefs are skipped.
 
 ## Known limitation: the mtime pre-filter is a heuristic in BOTH directions
 
@@ -144,6 +148,7 @@ Two more findings from code review, deliberately accepted rather than fixed for 
 - `harness_cli/transcripts.py` — parses one `.jsonl` transcript into a `SessionUsage`.
 - `harness_cli/model.py` — data model + error-text classification.
 - `harness_cli/report.py` — text/JSON rendering.
+- `harness_cli/search.py` — parent-session user-message search (CC + OMP).
 - `harness_cli/cli.py` — thin argparse dispatch.
 
 Adding a second harness (opencode/omp/codex) means adding a sibling module that produces the
