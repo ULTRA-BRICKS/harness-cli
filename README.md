@@ -1,7 +1,7 @@
 # harness-cli
 
 `harness limits` shows **real rate-limit proximity** for agent-harness accounts on
-this machine: per-account cards with Session / Weekly / extra-window bars, `% used`,
+this machine: per-account cards with Session (5h) / Weekly (7d) bracketed bars, `% used`,
 reset countdown, and a pace line when the current rate would exhaust the window
 before reset.
 
@@ -11,10 +11,10 @@ local transcript token counts (that is a different problem, which
 
 ```
 Claude Code  invntrm@gmail.com  Max 20x
-  Session         ████████░░░░░░░░░░░░░░░░  42% used  resets in 3h 12m
-  Weekly          ████████████████░░░░░░░░  81% used  resets in 2d 4h
-  Weekly·Fable    ███████████████████░░░░░  96% used  resets in 2d 4h
-  At this pace you'll run out in 6h 4m
+  Session (5h)      [██████████░░░░░░░░░░░░░░]  42% used  resets in 3h 12m
+  Weekly (7d)       [███████████████████░░░░░]  81% used  resets in 2d 4h
+  Weekly·Fable (7d) [███████████████████████░]  96% used  resets in 2d 4h
+  At this pace you'll run out in 2h 29m
   Updated 12s ago
 ```
 

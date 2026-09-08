@@ -2,7 +2,9 @@
 
 Accessed via: `harness limits` after limits_collect returns cards.
 Assumptions: used_percent comes from a real usage API. Fail-closed cards must
-not grow a bar or a percent. Color honors NO_COLOR / FORCE_COLOR / isatty.
+not grow a bar or a percent. Duration tags come from window_seconds (`5h` /
+`7d`) and are omitted when that field is missing — never invented. Color honors
+NO_COLOR / FORCE_COLOR / isatty.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from typing import TextIO
 from harness_cli.limits_model import LimitCard, LimitWindow
 
 BAR_WIDTH = 24
+LABEL_WIDTH = 18  # fits `Weekly·Fable (7d)`
 RED = "\x1b[31m"
 GREEN = "\x1b[32m"
 RESET = "\x1b[0m"
@@ -45,6 +48,28 @@ def format_duration(seconds: float) -> str:
     if minutes:
         return f"{minutes}m"
     return f"{secs}s"
+
+
+def window_duration_tag(window_seconds: float | None) -> str | None:
+    """Compact window length: 5*3600 → `5h`, 7*86400 → `7d`. Omit if unknown."""
+    if window_seconds is None:
+        return None
+    try:
+        secs = float(window_seconds)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(secs) or secs <= 0:
+        return None
+    total = int(secs)
+    if total <= 0:
+        return None
+    if total % 86400 == 0:
+        return f"{total // 86400}d"
+    if total % 3600 == 0:
+        return f"{total // 3600}h"
+    if total % 60 == 0:
+        return f"{total // 60}m"
+    return f"{total}s"
 
 
 def format_ago(seconds: float) -> str:
@@ -113,15 +138,30 @@ def _now(now: datetime | None) -> datetime:
     return datetime.now(timezone.utc)
 
 
-def render_window_line(window: LimitWindow, now: datetime, color: bool) -> str:
-    label = f"  {window.name:<15}"
+def window_label(window: LimitWindow) -> str:
+    tag = window_duration_tag(window.window_seconds)
+    return f"{window.name} ({tag})" if tag else window.name
+
+
+def card_label_width(windows: list[LimitWindow]) -> int:
+    width = LABEL_WIDTH
+    for window in windows:
+        width = max(width, len(window_label(window)))
+    return width
+
+
+def render_window_line(
+    window: LimitWindow, now: datetime, color: bool, label_width: int = LABEL_WIDTH
+) -> str:
+    label = f"  {window_label(window):<{label_width}}"
     if window.used_percent is None:
         return f"{label}unknown"
     pct = float(window.used_percent)
     if not math.isfinite(pct):
         return f"{label}unknown"
     pct = max(0.0, min(100.0, pct))
-    bar = _paint(render_bar(pct), color, pct)
+    # Brackets stay uncolored so ANSI codes cannot shift the track column.
+    bar = f"[{_paint(render_bar(pct), color, pct)}]"
     shown = f"{round(pct)}% used"
     reset = ""
     if window.resets_at is not None:
@@ -139,8 +179,9 @@ def render_card(card: LimitCard, now: datetime, color: bool) -> str:
         reason = card.reason or "unavailable — not guessed from tokens"
         lines.append(f"  {reason}")
     else:
+        width = card_label_width(card.windows)
         for window in card.windows:
-            lines.append(render_window_line(window, now, color))
+            lines.append(render_window_line(window, now, color, width))
         pace = card_pace_seconds(card, now)
         if pace is not None:
             lines.append(f"  At this pace you'll run out in {format_duration(pace)}")
