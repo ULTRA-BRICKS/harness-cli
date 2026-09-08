@@ -44,8 +44,6 @@ def _as_percent(value: object) -> float | None:
     pct = float(value)
     if not math.isfinite(pct):
         return None
-    if 0 <= pct <= 1:
-        pct *= 100.0
     if pct < 0 or pct > 100:
         return None
     return pct

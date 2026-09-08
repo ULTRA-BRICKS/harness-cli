@@ -174,3 +174,29 @@ def test_reads_email_from_sibling_dot_claude_json(tmp_path, monkeypatch):
     claude_cards = [c for c in cards if c.provider == "Claude Code"]
     assert any(c.account == "invntrm@gmail.com" for c in claude_cards)
     assert all(c.account != ".claude" and c.account != "default" for c in claude_cards)
+
+def test_codex_percent_one_is_one_percent_not_one_hundred():
+    from harness_cli.providers.codex import _as_percent
+
+    assert _as_percent(1) == 1.0
+    assert _as_percent(0.5) == 0.5
+    assert _as_percent(36) == 36.0
+
+
+def test_zai_percent_one_is_one_percent_not_one_hundred():
+    from harness_cli.providers.zai import _percent
+
+    assert _percent(1) == 1.0
+    assert _percent(0.5) == 0.5
+    assert _percent(100) == 100.0
+
+
+def test_claude_discovers_account_beyond_two(tmp_path, monkeypatch):
+    from harness_cli.providers.claude import iter_config_dirs
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".claude" / "projects").mkdir(parents=True)
+    for i in (0, 1, 2, 3):
+        (tmp_path / ".claude-accounts" / f"account-{i}" / "projects").mkdir(parents=True)
+    names = {p.name for p in iter_config_dirs(tmp_path)}
+    assert "account-3" in names

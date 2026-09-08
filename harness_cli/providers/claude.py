@@ -331,10 +331,9 @@ def _resolve_token(creds: dict) -> tuple[str | None, str | None]:
 
 
 def iter_config_dirs(home: Path) -> list[Path]:
-    dirs = [home / ".claude"]
-    for index in (0, 1, 2):
-        dirs.append(home / ".claude-accounts" / f"account-{index}")
-    return [path for path in dirs if path.is_dir()]
+    from harness_cli.discovery import discover_account_dirs
+
+    return discover_account_dirs(home)
 
 
 def current_config_dir(home: Path) -> Path:
