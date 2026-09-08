@@ -62,7 +62,7 @@ def format_ago(seconds: float) -> str:
 
 def render_bar(percent: float, width: int = BAR_WIDTH) -> str:
     pct = max(0.0, min(100.0, float(percent)))
-    filled = int(round(pct / 100.0 * width))
+    filled = round(pct / 100.0 * width)
     filled = max(0, min(width, filled))
     return "█" * filled + "░" * (width - filled)
 
@@ -122,7 +122,7 @@ def render_window_line(window: LimitWindow, now: datetime, color: bool) -> str:
         return f"{label}unknown"
     pct = max(0.0, min(100.0, pct))
     bar = _paint(render_bar(pct), color, pct)
-    shown = f"{int(round(pct))}% used"
+    shown = f"{round(pct)}% used"
     reset = ""
     if window.resets_at is not None:
         remaining = (window.resets_at - now).total_seconds()

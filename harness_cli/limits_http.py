@@ -9,11 +9,11 @@ fail-closed results, not raised.
 from __future__ import annotations
 
 import json
+import urllib.request
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
-import urllib.request
 
 _DEFAULT_TIMEOUT = 10
 _MAX_BODY = 1_000_000
@@ -100,17 +100,15 @@ def json_request(
                 bounded = _read_bounded(exc.fp)
                 raw = b"" if bounded is None else bounded
             return HttpResult(status=code, payload=_parse_body(raw), error=_reason_for_status(code))
-        except Exception:
+        except (OSError, ValueError, TypeError, AttributeError):
             return HttpResult(status=0, payload=None, error="network error")
     except TimeoutError:
         return HttpResult(status=0, payload=None, error="timeout")
     except URLError:
         return HttpResult(status=0, payload=None, error="network error")
-    except (OSError, ValueError, UnicodeError):
+    except (OSError, ValueError, TypeError, AttributeError, RuntimeError, LookupError, UnicodeError):
         # ValueError/UnicodeError: malformed header values. Never stringify —
         # urllib's message can include the Authorization header.
-        return HttpResult(status=0, payload=None, error="network error")
-    except Exception:
         return HttpResult(status=0, payload=None, error="network error")
 
     if raw is None:

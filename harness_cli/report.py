@@ -76,8 +76,10 @@ def render_current(session: SessionUsage | None, how: str, window_hours: float) 
         f"  account:        {_sanitize(session.account)}",
         f"  transcript:     {_sanitize(session.transcript_path)}",
         f"  session id:     {_sanitize(session.session_id)}",
-        f"  window:         observed usage is NOT windowed to {window_hours}h "
-        f"(single-file scan; see 'harness limits --all' for cross-file rollups)",
+        (
+            f"  window:         observed usage is NOT windowed to {window_hours}h "
+            f"(single-file scan; see 'harness limits --all' for cross-file rollups)"
+        ),
         f"  first activity: {first_activity}",
         f"  last activity:  {last_activity}",
         f"  messages:       {session.message_count}",
@@ -106,8 +108,10 @@ def render_all(sessions: list[SessionUsage], window_hours: float) -> str:
     else:
         scope = f"last active in the last {window_hours:g}h"
     lines = [
-        f"Observed usage across {len(sessions)} transcript(s) {scope}, "
-        f"{len(by_account)} account(s):",
+        (
+            f"Observed usage across {len(sessions)} transcript(s) {scope}, "
+            f"{len(by_account)} account(s):"
+        ),
         # Token/message totals below are EACH SESSION'S FULL lifetime total, not just
         # what happened inside the window - a session touched once 10 minutes ago still
         # reports everything it has ever done. This is a session-level filter (include

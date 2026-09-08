@@ -13,7 +13,6 @@ import sys
 
 from harness_cli import __version__
 
-
 # Generous upper bound (~1,000 years) - comfortably below the point where
 # `timedelta(hours=...)` itself overflows (`OverflowError: Python int too large to
 # convert to C int`, reproduced with e.g. --window-hours 1e308, which passes a naive

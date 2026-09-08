@@ -59,8 +59,7 @@ def _next_id(store: Path) -> int:
             number = int(path.stem)
         except ValueError:
             continue
-        if number > highest:
-            highest = number
+        highest = max(highest, number)
     return highest + 1
 
 
