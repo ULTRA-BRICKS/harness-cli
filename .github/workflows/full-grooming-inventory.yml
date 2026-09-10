@@ -1,0 +1,53 @@
+name: Private harness grooming inventory
+on:
+  push:
+    branches: [docs/full-grooming-2026-09-10]
+    paths: [.github/workflows/full-grooming-inventory.yml]
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Collect private data only into this private repository's artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import base64,datetime,hashlib,json,os,pathlib,subprocess,urllib.request
+          root=pathlib.Path('grooming-inventory');root.mkdir()
+          def get(path):
+              req=urllib.request.Request('https://api.github.com/repos/'+os.environ['REPO']+path,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'})
+              with urllib.request.urlopen(req,timeout=60) as r:return json.load(r)
+          def pages(path):
+              rows=[];page=1
+              while True:
+                  batch=get(path+('&' if '?' in path else '?')+'per_page=100&page='+str(page));rows.extend(batch)
+                  if len(batch)<100:return rows
+                  page+=1
+          issues=[r for r in pages('/issues?state=all&sort=created&direction=asc') if 'pull_request' not in r]
+          prs=pages('/pulls?state=all&sort=created&direction=asc')
+          comments=pages('/issues/comments?sort=created&direction=asc')
+          for name,rows in [('harness-cli.json',issues),('harness-cli-prs.json',prs),('harness-cli-comments.json',comments)]:
+              (root/name).write_text(json.dumps(rows,ensure_ascii=False,indent=2))
+          sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          subprocess.run(['git','archive','--format=tar.gz','--prefix=harness-cli/','--output='+str(root/'harness-cli-source.tar.gz'),'HEAD'],check=True)
+          previous=get('/contents/docs/specs/2026-09-10-harness-contracts.md?ref=docs%2Fecosystem-grooming-2026-09-10')
+          (root/'2026-09-10-harness-contracts.md').write_bytes(base64.b64decode(previous['content']))
+          summary={'generated_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'repository':os.environ['REPO'],'private':True,'source_sha':sha,'issues':len(issues),'open':sum(r['state']=='open' for r in issues),'closed':sum(r['state']=='closed' for r in issues),'prs':len(prs),'comments':len(comments),'issue_mutations':0,'complete':True}
+          (root/'harness-summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary))
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: private-harness-grooming-inventory
+          path: grooming-inventory/
+          retention-days: 30
