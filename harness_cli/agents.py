@@ -10,6 +10,9 @@ live), never a process-liveness API. Missing or corrupt question files yield an
 empty list, not an error. `req.toolInput` is never copied into the landscape.
 `last_text` is redacted before assignment (Authorization headers, Bearer/OAuth,
 sk-/ghp-/xox-like tokens); redact failure yields empty text, never the original.
+`--live` additionally resolves `cwd`/`session_id` via each kind's nudge-handler
+`resolve_target` (see `harness_cli/nudge.py`); `nudge_supported` is cheap (no file
+I/O) and present on every row regardless of `--live`.
 
 Past bugs: `_sanitize` only stripped controls, so a pasted `Authorization: Bearer`
 snippet leaked through `harness agents --json`, HTML, and SSE.
@@ -24,7 +27,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from harness_cli import discovery
+from harness_cli import discovery, nudge
 from harness_cli.report import _sanitize
 from harness_cli.tasks import list_tickets
 from harness_cli.transcripts import _open_transcript_atomically
@@ -166,6 +169,7 @@ def _agent_row(
         "mtime": _iso_mtime(mtime),
         "status": _status(mtime, now_ts),
         "last_text": _last_text(path),
+        "nudge_supported": nudge.nudge_supported(harness),
     }
 
 
@@ -202,11 +206,20 @@ def collect_cc_agents(now_ts: float, modified_after: float | None) -> list[dict]
     return rows
 
 
+def _add_live_target_fields(row: dict) -> None:
+    """Populate cwd/session_id via a live file-read; callers gate this to --live rows only."""
+    target = nudge.resolve_target_for(row["harness"], Path(row["path"]))
+    row["cwd"] = target.get("cwd") if target else None
+    row["session_id"] = target.get("session_id") if target else None
+
+
 def _question_row(item: dict) -> dict | None:
     req = item.get("req")
     if not isinstance(req, dict):
         return None
-    row = {field: _sanitize(str(req[field])) if field in req else "" for field in _QUESTION_REQ_FIELDS}
+    row = {
+        field: _sanitize(str(req[field])) if field in req else "" for field in _QUESTION_REQ_FIELDS
+    }
     at = item.get("at")
     row["at"] = _sanitize(str(at)) if at is not None else ""
     message_id = item.get("messageId")
@@ -242,7 +255,7 @@ def collect_questions() -> list[dict]:
     return rows
 
 
-def build_landscape(*, include_all: bool = False) -> dict:
+def build_landscape(*, include_all: bool = False, live_only: bool = False) -> dict:
     now = datetime.now(timezone.utc)
     now_ts = now.timestamp()
     modified_after = None
@@ -251,6 +264,10 @@ def build_landscape(*, include_all: bool = False) -> dict:
         modified_after = now_ts - DEFAULT_WINDOW_HOURS * 3600
         window = "24h"
     agents = collect_omp_agents(now_ts, modified_after) + collect_cc_agents(now_ts, modified_after)
+    if live_only:
+        agents = [row for row in agents if row.get("status") == "live"]
+        for row in agents:
+            _add_live_target_fields(row)
     agents.sort(key=lambda row: row.get("mtime") or "", reverse=True)
     return {
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -272,9 +289,10 @@ def render_landscape(data: dict) -> str:
     if not agents:
         lines.append("  (none)")
     for row in agents:
+        marker = " [nudge]" if row.get("nudge_supported") and row.get("status") == "live" else ""
         lines.append(
             f"  {row.get('status', ''):6} {row.get('harness', ''):6} "
-            f"{row.get('kind', ''):8} {_sanitize(str(row.get('name', '')))}  "
+            f"{row.get('kind', ''):8} {_sanitize(str(row.get('name', '')))}{marker}  "
             f"{_sanitize(str(row.get('last_text') or ''))}"
         )
     lines.extend(["", "Questions"])
@@ -301,7 +319,8 @@ def render_landscape(data: dict) -> str:
 
 def run(args: argparse.Namespace) -> int:
     include_all = bool(getattr(args, "all", False))
-    data = build_landscape(include_all=include_all)
+    live_only = bool(getattr(args, "live", False))
+    data = build_landscape(include_all=include_all, live_only=live_only)
     if getattr(args, "json", False):
         print(json.dumps(data))
         return 0
