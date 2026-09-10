@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "source_version": 4,
+  "context": {
+    "repository": "ultrabricks/harness-cli",
+    "repository_id": 1360550167,
+    "source_ref": "f707ee2b2f643a4621121187df442554aa968244",
+    "snapshot_run": "34541300125",
+    "mutations": "body only",
+    "manual_exclusions": [
+      {
+        "key": "harness-cli#18",
+        "reason": "Issue-specific rewrite applied separately; preserve it.",
+        "observed_body_sha256": "a64840ceb274dfe9a5a994412f41d13ea9e5eda631590262539ee332568280df"
+      }
+    ]
+  },
+  "mode": "apply",
+  "started_at": "2026-09-10T23:38:13.783890+00:00",
+  "events": [
+    {
+      "key": "harness-cli#29",
+      "number": 29,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "82c2e7ad16258cd4f31ed87f2ef5ef34e14fb43fd690bdce90423b806a20200a"
+    },
+    {
+      "key": "harness-cli#26",
+      "number": 26,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "e919ccbd3e130351f7eff5fbab312da1ddefb87185c16a425f8ba70a7e1aa9f5"
+    },
+    {
+      "key": "harness-cli#24",
+      "number": 24,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "4826d9775b6dfa62f5ab9663bf3856d8fe7b119be3f13e79895f8aed9b56fac4"
+    },
+    {
+      "key": "harness-cli#21",
+      "number": 21,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "00c3fd46672168f16e8f7e21072222d84fee40622a8fc7ffc5ea5505edb37044"
+    },
+    {
+      "key": "harness-cli#17",
+      "number": 17,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "7cb0bf4e6794f3a5033f827b6df89e3d1557d31ca04be3ccf98f64ddaa789f54"
+    },
+    {
+      "key": "harness-cli#30",
+      "number": 30,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "f42c26a059dbeab922b42f591a5214928506efdf0ea753ccc39982383204ed9e"
+    },
+    {
+      "key": "harness-cli#28",
+      "number": 28,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "32a8438b2763f7b45074e6d1ab4422cd8304337e8d9a9037fd84a84d969d417b"
+    },
+    {
+      "key": "harness-cli#25",
+      "number": 25,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "fa02c2aaccad10a09131a26a12da2557ee6bc5e2c28054e7aed9452c4f337afa"
+    },
+    {
+      "key": "harness-cli#22",
+      "number": 22,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "9391f447b3ecf7a3b5e4ee360aa0ad1c2d474f434dd878aa3fc65e2fafa012cd"
+    },
+    {
+      "key": "harness-cli#12",
+      "number": 12,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "990db649b9667839137ab6ae6975e5f8e391054b1a1baaa4eac6bdb1f4838e1f"
+    },
+    {
+      "key": "harness-cli#11",
+      "number": 11,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "68a73293ecfed6f716bb57921d3d8c4b86839b1489250643c4bbe7db15de7560"
+    },
+    {
+      "key": "harness-cli#9",
+      "number": 9,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "64171598e6ef3e0937ec172c619648550d9f70f85ba2e204296ccfd2556908fd"
+    },
+    {
+      "key": "harness-cli#5",
+      "number": 5,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "fa171c19ae1f3161f25bf6c8fca6f48e6cdd96b6c2582cffe97dea39e0eefe67"
+    },
+    {
+      "key": "harness-cli#19",
+      "number": 19,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "5cc5c097f5c7cb9e1a56efa4137ab909b0e654d9cf54080f4ae7f1b62dfcb6e5"
+    },
+    {
+      "key": "harness-cli#15",
+      "number": 15,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "47a41f3f62cdfbca234ec0d4fd0740f85d64125b724b2499f06ebfed75c5a25a"
+    },
+    {
+      "key": "harness-cli#8",
+      "number": 8,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "5e8d00714890e3806e341a1d24da993312551956c78f40799802c6a7aa333b65"
+    },
+    {
+      "key": "harness-cli#6",
+      "number": 6,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "ed787ed221181e84af4ae369bb2f05d2e89307d8e1b54f9927e78408d0d62c3f"
+    },
+    {
+      "key": "harness-cli#2",
+      "number": 2,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "b673e828a0f9315b383bcc1c8a16a549fc371893c490a39c04d04d0f7f90f5f9"
+    },
+    {
+      "key": "harness-cli#1",
+      "number": 1,
+      "result": "patch-received-awaiting-readback",
+      "observed_before_sha256": "6fdd7a536a83b23b6df709279c9143f8f2f70cc8bffadb8958fb498d08cb939d"
+    },
+    {
+      "key": "harness-cli#14",
+      "number": 14,
+      "result": "delivery-uncertain",
+      "observed_before_sha256": "6fcc64d3bf23e1e55d5d8e4d9b600f17b963c3d9289f505d2dd2d538d4af68d1"
+    }
+  ],
+  "writes": 19,
+  "complete": false,
+  "fatal": "delivery-uncertain",
+  "product_acceptance": false,
+  "counts": {
+    "patch-received-awaiting-readback": 19,
+    "delivery-uncertain": 1
+  },
+  "pending_write": {
+    "key": "harness-cli#14",
+    "intended_sha256": "91e7ddca4c7db7bf5d360aa1408ad7fdb44197acbd0733adaca1884b7e7ff424"
+  },
+  "readback_error": "HTTPError",
+  "planned": 20,
+  "remaining_or_conflicted": 20,
+  "finished_at": "2026-09-10T23:41:02.251853+00:00"
+}
