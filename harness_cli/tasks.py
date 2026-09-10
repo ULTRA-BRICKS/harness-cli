@@ -1,6 +1,6 @@
 """Local process-ticket tracker so agent/session work stays off product GitHub.
 
-Accessed via: `harness task new|list|done` -> cli._run_task -> this module.
+Accessed via: `harness tasks new|list|done` -> cli._run_tasks -> this module.
 
 Assumptions: tickets are local JSON files only. This module never calls `gh`,
 never hits api.github.com, and never inspects the cwd git remote. Store path is
@@ -162,7 +162,7 @@ def _cmd_done(args: argparse.Namespace) -> int:
 
 
 def run(args: argparse.Namespace) -> int:
-    command = args.task_command
+    command = args.tasks_command
     if command == "new":
         return _cmd_new(args)
     if command == "list":

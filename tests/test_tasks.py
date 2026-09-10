@@ -13,16 +13,16 @@ from harness_cli import cli
 _TITLE_263 = "Review documentation diff for performance regressions"
 
 
-def test_top_level_help_lists_task(capsys):
+def test_top_level_help_lists_tasks(capsys):
     rc = cli.main([])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "task" in out
+    assert "tasks" in out
 
 
-def test_task_help_lists_new_list_done(capsys):
+def test_tasks_help_lists_new_list_done(capsys):
     with pytest.raises(SystemExit) as exc_info:
-        cli.main(["task", "--help"])
+        cli.main(["tasks", "--help"])
     captured = capsys.readouterr()
     assert exc_info.value.code == 0
     help_text = captured.out
@@ -74,7 +74,7 @@ def test_process_ticket_does_not_create_github_product_issue(tmp_path, monkeypat
 
     monkeypatch.setattr(urllib.request, "urlopen", _no_network)
 
-    rc = cli.main(["task", "new", "--title", _TITLE_263])
+    rc = cli.main(["tasks", "new", "--title", _TITLE_263])
     captured = capsys.readouterr()
     assert rc == 0
     assert not sentinel.exists()
@@ -88,63 +88,63 @@ def test_process_ticket_does_not_create_github_product_issue(tmp_path, monkeypat
     assert _TITLE_263 in captured.out
 
 
-def test_task_list_and_done_stay_local(tmp_path, monkeypatch, capsys):
+def test_tasks_list_and_done_stay_local(tmp_path, monkeypatch, capsys):
     store = tmp_path / "tasks"
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
 
-    rc = cli.main(["task", "new", "--title", "session chore"])
+    rc = cli.main(["tasks", "new", "--title", "session chore"])
     assert rc == 0
     capsys.readouterr()
 
-    rc = cli.main(["task", "list"])
+    rc = cli.main(["tasks", "list"])
     listed = capsys.readouterr().out
     assert rc == 0
     assert "session chore" in listed
 
-    rc = cli.main(["task", "done", "1"])
+    rc = cli.main(["tasks", "done", "1"])
     assert rc == 0
     capsys.readouterr()
 
-    rc = cli.main(["task", "list"])
+    rc = cli.main(["tasks", "list"])
     hidden = capsys.readouterr().out
     assert rc == 0
     assert "session chore" not in hidden
 
-    rc = cli.main(["task", "list", "--all"])
+    rc = cli.main(["tasks", "list", "--all"])
     shown = capsys.readouterr().out
     assert rc == 0
     assert "session chore" in shown
     assert "done" in shown
 
 
-def test_task_done_unknown_id_exits_1(tmp_path, monkeypatch, capsys):
+def test_tasks_done_unknown_id_exits_1(tmp_path, monkeypatch, capsys):
     store = tmp_path / "tasks"
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
 
-    rc = cli.main(["task", "done", "99"])
+    rc = cli.main(["tasks", "done", "99"])
     captured = capsys.readouterr()
     assert rc == 1
     assert "99" in captured.out + captured.err
 
 
-def test_task_new_strips_terminal_escapes(tmp_path, monkeypatch, capsys):
+def test_tasks_new_strips_terminal_escapes(tmp_path, monkeypatch, capsys):
     store = tmp_path / "tasks"
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
     title = "\x1b]52;c;c3RvbGVu\x07looks-fine"
-    rc = cli.main(["task", "new", "--title", title])
+    rc = cli.main(["tasks", "new", "--title", title])
     captured = capsys.readouterr()
     assert rc == 0
     assert "\x1b" not in captured.out
     assert "looks-fine" in captured.out
 
 
-def test_task_list_skips_malformed_id(tmp_path, monkeypatch, capsys):
+def test_tasks_list_skips_malformed_id(tmp_path, monkeypatch, capsys):
     store = tmp_path / "tasks"
     store.mkdir()
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
@@ -164,7 +164,9 @@ def test_task_list_skips_malformed_id(tmp_path, monkeypatch, capsys):
         ),
         encoding="utf-8",
     )
-    rc = cli.main(["task", "list"])
+    rc = cli.main(["tasks", "list"])
     captured = capsys.readouterr()
     assert rc == 0
     assert "huge" not in captured.out
+
+

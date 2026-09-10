@@ -43,24 +43,24 @@ def _days(value: str) -> float:
     return _finite_non_negative(value, "--days", _MAX_DAYS)
 
 
-def _add_task_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
-    task = sub.add_parser(
-        "task",
+def _add_tasks_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    tasks = sub.add_parser(
+        "tasks",
         help="Local process-ticket tracker (not GitHub issues).",
         description=(
             "Create, list, and close local process tickets. Never files a GitHub issue."
         ),
     )
-    task_sub = task.add_subparsers(dest="task_command")
-    created = task_sub.add_parser("new", help="Create a local process ticket.")
+    tasks_sub = tasks.add_subparsers(dest="tasks_command")
+    created = tasks_sub.add_parser("new", help="Create a local process ticket.")
     created.add_argument("--title", required=True, help="Ticket title.")
     created.add_argument("--body", default="", help="Optional ticket body.")
-    listed = task_sub.add_parser("list", help="List local process tickets.")
+    listed = tasks_sub.add_parser("list", help="List local process tickets.")
     listed.add_argument("--all", action="store_true", help="Include done tickets.")
     listed.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
-    done = task_sub.add_parser("done", help="Mark a local process ticket done.")
+    done = tasks_sub.add_parser("done", help="Mark a local process ticket done.")
     done.add_argument("ticket_id", type=int, metavar="ID", help="Ticket id.")
-    return task
+    return tasks
 
 
 def _add_agents_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -151,7 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
         "0 disables the filter.",
     )
 
-    parser.task_parser = _add_task_parser(sub)
+    parser.tasks_parser = _add_tasks_parser(sub)
     parser.agents_parser = _add_agents_parser(sub)
     return parser
 
@@ -168,11 +168,11 @@ def main(argv: list[str] | None = None) -> int:
         return _run_limits(args)
     if args.command == "search":
         return _run_search(args)
-    if args.command == "task":
-        if getattr(args, "task_command", None) is None:
-            parser.task_parser.print_help()
+    if args.command == "tasks":
+        if getattr(args, "tasks_command", None) is None:
+            parser.tasks_parser.print_help()
             return 0
-        return _run_task(args)
+        return _run_tasks(args)
     if args.command == "agents":
         return _run_agents(args)
 
@@ -189,7 +189,7 @@ def _run_search(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_task(args: argparse.Namespace) -> int:
+def _run_tasks(args: argparse.Namespace) -> int:
     # Imported lazily: keep `harness --help` / `harness --version` on the stdlib-only
     # fast path, matching _run_limits / _run_search.
     from harness_cli.tasks import run
@@ -199,7 +199,7 @@ def _run_task(args: argparse.Namespace) -> int:
 
 def _run_agents(args: argparse.Namespace) -> int:
     # Imported lazily: keep `harness --help` / `harness --version` on the stdlib-only
-    # fast path, matching _run_limits / _run_search / _run_task.
+    # fast path, matching _run_limits / _run_search / _run_tasks.
     if getattr(args, "agents_command", None) == "web":
         from harness_cli.agents_web import run as run_web
 
