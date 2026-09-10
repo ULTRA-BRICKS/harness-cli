@@ -28,9 +28,9 @@ of inventing a number.
 harness limits --current [--json]
 harness limits --all [--window-hours N] [--json]
 harness search QUERY [--days N]
-harness task new --title TITLE [--body BODY]
-harness task list [--all] [--json]
-harness task done ID
+harness tasks new --title TITLE [--body BODY]
+harness tasks list [--all] [--json]
+harness tasks done ID
 harness agents [--json] [--all]
 harness agents web [--host H] [--port N] [--no-open]
 ```
@@ -44,7 +44,7 @@ harness agents web [--host H] [--port N] [--no-open]
   non-negative, not overflowing). It does **not** drive a fake percent for `--all`.
 - `search` finds user messages in Claude Code and Oh My Pi *parent* session transcripts
   (`QUERY` is a case-insensitive substring; `--days` defaults to 3, `0` disables).
-- `task` is the local process-ticket tracker for agent/session work; it writes JSON under
+- `tasks` is the local process-ticket tracker for agent/session work; it writes JSON under
   `$HARNESS_TASK_DIR` (else XDG/state) and never files a GitHub issue.
 - `agents` lists OMP and Claude Code parent + nested sessions, pending tg-ctl questions,
   and open harness tasks. Default age window is 24 hours (`--all` disables it and includes

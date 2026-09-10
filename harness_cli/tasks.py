@@ -1,6 +1,6 @@
 """Local process-ticket tracker so agent/session work stays off product GitHub.
 
-Accessed via: `harness task new|list|done` -> cli._run_task -> this module.
+Accessed via: `harness tasks new|list|done` -> cli._run_tasks -> this module.
 
 Assumptions: tickets are local JSON files only. This module never calls `gh`,
 never hits api.github.com, and never inspects the cwd git remote. Store path is
@@ -63,6 +63,25 @@ def _next_id(store: Path) -> int:
     return highest + 1
 
 
+_MAX_CREATE_ATTEMPTS = 50
+
+
+def _exclusive_write(path: Path, payload: dict) -> None:
+    """Create `path` only if it does not already exist; raise FileExistsError otherwise.
+
+    Unlike `_atomic_write` (temp file + `Path.replace`, which replaces unconditionally),
+    this never clobbers a file another process already created for the same id.
+    """
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+            fh.write("\n")
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+
+
 def _labels() -> list[str]:
     labels = ["agent"]
     session = os.environ.get("TASK_SESSION")
@@ -82,19 +101,39 @@ def _ticket_id(payload: dict) -> int | None:
 
 
 def create_ticket(title: str, body: str = "") -> dict:
+    """Reserve a ticket id and write it exclusively, retrying past collisions.
+
+    Past bug (#8): `_next_id` (scan-then-write) combined with `_atomic_write`
+    (unconditional replace) let two concurrent `tasks new` calls compute the
+    same next id and one silently clobber the other's ticket file with no
+    error. Exclusive create (O_CREAT|O_EXCL) turns that race into a retry
+    with a fresh id, and a bounded number of collisions into a clear error
+    instead of a silent lost update.
+    """
     store = task_dir()
-    ticket_id = _next_id(store)
-    ticket = {
-        "id": ticket_id,
-        "title": title,
-        "body": body,
-        "state": "open",
-        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "session": os.environ.get("TASK_SESSION") or "",
-        "labels": _labels(),
-    }
-    _atomic_write(store / f"{ticket_id}.json", ticket)
-    return ticket
+    store.mkdir(parents=True, exist_ok=True)
+    last_error: FileExistsError | None = None
+    for _ in range(_MAX_CREATE_ATTEMPTS):
+        ticket_id = _next_id(store)
+        ticket = {
+            "id": ticket_id,
+            "title": title,
+            "body": body,
+            "state": "open",
+            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "session": os.environ.get("TASK_SESSION") or "",
+            "labels": _labels(),
+        }
+        try:
+            _exclusive_write(store / f"{ticket_id}.json", ticket)
+        except FileExistsError as exc:
+            last_error = exc
+            continue
+        return ticket
+    raise RuntimeError(
+        f"could not reserve a harness task id after {_MAX_CREATE_ATTEMPTS} attempts "
+        "(concurrent `tasks new` collision)"
+    ) from last_error
 
 
 def list_tickets(include_done: bool = False) -> list[dict]:
@@ -134,7 +173,11 @@ def mark_done(ticket_id: int) -> dict | None:
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
-    ticket = create_ticket(args.title, args.body or "")
+    try:
+        ticket = create_ticket(args.title, args.body or "")
+    except RuntimeError as exc:
+        print(_sanitize(str(exc)), file=sys.stderr)
+        return 1
     print(_sanitize(str(ticket["title"])))
     return 0
 
@@ -162,7 +205,7 @@ def _cmd_done(args: argparse.Namespace) -> int:
 
 
 def run(args: argparse.Namespace) -> int:
-    command = args.task_command
+    command = args.tasks_command
     if command == "new":
         return _cmd_new(args)
     if command == "list":

@@ -18,7 +18,7 @@ See `README.md` for data sources and fail-closed rules.
   HTTP status (`unauthorized (HTTP 401)`), not the secret.
 - **Stdlib-only at import time.** `harness_cli/cli.py`'s `build_parser()` and
   module import must succeed with zero third-party imports. Heavy/network work
-  is imported lazily inside `_run_limits` / `_run_search` / `_run_task` / `_run_agents`.
+  is imported lazily inside `_run_limits` / `_run_search` / `_run_tasks` / `_run_agents`.
 - **Fail closed.** Missing creds, 401/403/429, or no usage endpoint → a card
   with a reason, empty windows, no bar, no fake `% used`.
 - Transcript modules stay; do not delete them. They must not feed `limits`.
