@@ -31,6 +31,18 @@ def test_tasks_help_lists_new_list_done(capsys):
     assert "done" in help_text
 
 
+def test_old_singular_task_command_is_gone(capsys):
+    # Regression for the task -> tasks rename: the old singular form must not
+    # linger as a silent alias. It should fail exactly like any other unknown
+    # top-level subcommand (argparse "invalid choice"), not be resolved.
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["task", "list"])
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "invalid choice" in err
+    assert "'task'" in err
+
+
 def test_process_ticket_does_not_create_github_product_issue(tmp_path, monkeypatch, capsys):
     # Regression for conloca/landing#263: a process ticket must stay in the local
     # store even when cwd is a product repo whose origin is GitHub. A fake `gh` and
