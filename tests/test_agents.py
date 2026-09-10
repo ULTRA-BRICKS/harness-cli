@@ -277,3 +277,61 @@ def test_last_text_cache_skips_reread_when_mtime_unchanged(tmp_path, monkeypatch
     third = agents._last_text(path)
     assert third == "updated snippet"
     assert opens["n"] == 2
+
+
+def test_agents_json_marks_nudge_supported_per_kind(tmp_path, monkeypatch, capsys):
+    _isolate(tmp_path, monkeypatch)
+    _seed_sessions(tmp_path)
+
+    rc = cli.main(["agents", "--json"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    data = json.loads(out)
+    by_harness = {row["harness"]: row for row in data["agents"]}
+    assert by_harness["omp"]["nudge_supported"] is True
+    assert by_harness["claude"]["nudge_supported"] is False
+    assert "cwd" not in by_harness["omp"]
+    assert "session_id" not in by_harness["omp"]
+
+
+def test_agents_live_flag_filters_to_live_and_resolves_omp_target(tmp_path, monkeypatch, capsys):
+    _isolate(tmp_path, monkeypatch)
+    live_path = tmp_path / ".omp" / "agent" / "sessions" / "-proj" / "sess.jsonl"
+    _write_jsonl(
+        live_path,
+        [
+            _text_entry("omp", "hello"),
+            {"type": "session", "id": "sess-live", "cwd": "/Users/x/proj", "title": "t"},
+        ],
+    )
+    old = tmp_path / ".omp" / "agent" / "sessions" / "-old" / "ancient.jsonl"
+    _write_jsonl(old, [_text_entry("omp", "ancient snippet")])
+    old_mtime = datetime.now(timezone.utc).timestamp() - 48 * 3600
+    os.utime(old, (old_mtime, old_mtime))
+
+    rc = cli.main(["agents", "--live", "--json"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    data = json.loads(out)
+
+    assert len(data["agents"]) == 1
+    row = data["agents"][0]
+    assert row["status"] == "live"
+    assert row["cwd"] == "/Users/x/proj"
+    assert row["session_id"] == "sess-live"
+
+
+def test_agents_live_flag_leaves_unresolvable_cwd_session_null(tmp_path, monkeypatch, capsys):
+    _isolate(tmp_path, monkeypatch)
+    path = tmp_path / ".claude" / "projects" / "-proj" / "parent-sess.jsonl"
+    _write_jsonl(path, [_text_entry("cc", "cc parent snippet")])
+
+    rc = cli.main(["agents", "--live", "--json"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    data = json.loads(out)
+
+    assert len(data["agents"]) == 1
+    row = data["agents"][0]
+    assert row["cwd"] is None
+    assert row["session_id"] is None

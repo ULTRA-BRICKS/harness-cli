@@ -31,8 +31,9 @@ harness search QUERY [--days N]
 harness tasks new --title TITLE [--body BODY]
 harness tasks list [--all] [--json]
 harness tasks done ID
-harness agents [--json] [--all]
+harness agents [--json] [--all] [--live]
 harness agents web [--host H] [--port N] [--no-open]
+harness nudge AGENT_ID MESSAGE [--json] [--timeout-ms N]
 ```
 
 - `--all` — every known account/provider on this machine (Claude Code slots,
@@ -53,6 +54,20 @@ harness agents web [--host H] [--port N] [--no-open]
   (`--port 0` binds ephemeral; `--no-open` skips the browser) with links to the review
   dashboard (7878), spec-web (7920), rig config-web (8787), rig evolve (8797), and 3d web
   (8733).
+- `--live` (on `agents`) — restrict to `status == "live"` rows and additionally
+  resolve `cwd`/`session_id` for kinds whose handler supports it (currently `omp`);
+  every row also carries a cheap `nudge_supported` bool regardless of `--live`.
+- `nudge` sends a message to one live agent by its `agents` row `id`
+  (`harness:kind:path`). Universal adapter API: per-kind protocol knowledge lives
+  behind `harness_cli/nudge.py`'s registry (`harness_cli/omp_acp.py` is the only real
+  implementation today — a faithful, one-shot port of tg-ctl's ACP JSON-RPC client).
+  `--json` emits `{"ok": true}` or `{"ok": false, "error": "...", "reason":
+  "unsupported"|"failed"|"not-found"}`; exit codes 0/1/2/3 mirror ok/failed/
+  unsupported/not-found so a scripted caller can distinguish "never gonna work for
+  this kind" from "transient failure, maybe retry". IPC is a subprocess+JSON contract
+  over argv/stdout, not a daemon: harness-cli is stdlib-only, one-shot argparse, with
+  zero daemon infra, and this is fire-and-forget (at most once per silence episode),
+  not a chat loop.
 
 ## Data sources (real % only)
 
@@ -78,6 +93,10 @@ On macOS the Keychain token is preferred when `~/.claude/.credentials.json` is s
 - `harness_cli/search.py` — parent-session user-message search (CC + OMP).
 - `harness_cli/tasks.py` — local process-ticket store (not GitHub).
 - `harness_cli/agents.py` — landscape collectors (OMP/CC agents, tg-ctl questions, tasks).
+- `harness_cli/nudge.py` — per-kind (harness) nudge registry; the ONLY place that
+  decides which harness supports a live nudge and how to resolve its live target.
+- `harness_cli/omp_acp.py` — omp ACP JSON-RPC client (NDJSON framing over `omp acp`
+  stdio); the one real `KIND_HANDLERS` implementation.
 - `harness_cli/agents_web.py` — local live landscape web view (ThreadingHTTPServer + SSE).
 - Stdlib only (no rich). Unicode bars (`█` / `░`). ANSI green below 90%, red at
   ≥90%. Honors `NO_COLOR` / `FORCE_COLOR` / isatty.
@@ -89,3 +108,29 @@ On macOS the Keychain token is preferred when `~/.claude/.credentials.json` is s
 python -m pytest -q
 ruff check .
 ```
+
+⚠ 1 unresolved conflict detected
+- ours = HEAD
+- theirs = 1481582 (feat: universal live-agent nudge API (agents --live, nudge))
+- base = parent of 1481582 (feat: universal live-agent nudge API (agents --live, nudge))
+NOTICE: Inspect a block by reading `conflict://<N>` (add `/ours` / `/theirs` / `/base` to render a single side). Resolve with `write({ path: "conflict://<N>", content })`, or bulk-resolve every registered conflict with `write({ path: "conflict://*", content })`. Writes replace ONLY the marker block (markers + all sides) — never repeat the lines before/after it; they stay in place.
+`content` shorthand: a line that is exactly `@ours` / `@theirs` / `@base` / `@both` expands to that recorded section. `@both` is ours-then-theirs with no separator — only for additive conflicts where each side adds something different; NEVER for competing edits of the same lines (pick a side or write the combined text). Lines that are not a token pass through verbatim, so `"// keep both\n@ours\n@theirs"` literally writes the comment, then ours, then theirs.
+Per-id bulk: `write({ path: "conflict://*", content: "1: @ours\n2: @theirs\n…" })` resolves each listed id with that side in ONE call — the cheapest way through many pick-one conflicts; unlisted ids stay registered.
+Resolve each block faithfully: keep one side (`@ours`/`@theirs`), or combine them when both intents apply — never invent content beyond the recorded sides, and never stack both sides of competing edits. Resolve several conflicts in a single turn by issuing multiple `write` calls at once; ids stay valid as earlier blocks are resolved.
+
+──── #1  L31-46 ────
+<<< ours
+harness tasks new --title TITLE [--body BODY]
+harness tasks list [--all] [--json]
+harness tasks done ID
+harness agents [--json] [--all]
+=== base
+harness task new --title TITLE [--body BODY]
+harness task list [--all] [--json]
+harness task done ID
+harness agents [--json] [--all]
+>>> theirs
+harness task new --title TITLE [--body BODY]
+harness task list [--all] [--json]
+harness task done ID
+harness agents [--json] [--all] [--live]

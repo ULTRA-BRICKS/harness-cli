@@ -47,9 +47,7 @@ def _add_tasks_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParse
     tasks = sub.add_parser(
         "tasks",
         help="Local process-ticket tracker (not GitHub issues).",
-        description=(
-            "Create, list, and close local process tickets. Never files a GitHub issue."
-        ),
+        description=("Create, list, and close local process tickets. Never files a GitHub issue."),
     )
     tasks_sub = tasks.add_subparsers(dest="tasks_command")
     created = tasks_sub.add_parser("new", help="Create a local process ticket.")
@@ -78,6 +76,14 @@ def _add_agents_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentPars
         action="store_true",
         help="Disable the 24-hour age window and include done tasks.",
     )
+    agents.add_argument(
+        "--live",
+        action="store_true",
+        help=(
+            "Only status=='live' rows; also resolves cwd/session_id via a live file-read "
+            "for kinds whose handler supports it (currently omp)."
+        ),
+    )
     agents_sub = agents.add_subparsers(dest="agents_command")
     web = agents_sub.add_parser(
         "web",
@@ -92,6 +98,31 @@ def _add_agents_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentPars
     )
     web.add_argument("--no-open", action="store_true", help="Do not open a browser.")
     return agents
+
+
+def _add_nudge_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    nudge = sub.add_parser(
+        "nudge",
+        help="Send a live nudge message to one local agent (universal per-kind adapter API).",
+        description=(
+            "Send MESSAGE to the live agent identified by AGENT_ID (the `id` field from a "
+            "`harness agents` row: harness:kind:path). Per-kind support lives in "
+            "harness_cli/nudge.py's KIND_HANDLERS registry; a kind with no handler wired "
+            "returns a documented reason, never a silent no-op."
+        ),
+    )
+    nudge.add_argument(
+        "agent_id", metavar="AGENT_ID", help="Agent id from `harness agents` (harness:kind:path)."
+    )
+    nudge.add_argument("message", metavar="MESSAGE", help="Text to send to the agent.")
+    nudge.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
+    nudge.add_argument(
+        "--timeout-ms",
+        type=int,
+        default=120000,
+        help="Timeout in milliseconds for the final send call (default 120000).",
+    )
+    return nudge
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -153,6 +184,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.tasks_parser = _add_tasks_parser(sub)
     parser.agents_parser = _add_agents_parser(sub)
+    parser.nudge_parser = _add_nudge_parser(sub)
     return parser
 
 
@@ -175,6 +207,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tasks(args)
     if args.command == "agents":
         return _run_agents(args)
+    if args.command == "nudge":
+        return _run_nudge(args)
 
     parser.print_help()
     return 1
@@ -205,6 +239,14 @@ def _run_agents(args: argparse.Namespace) -> int:
 
         return run_web(args)
     from harness_cli.agents import run
+
+    return run(args)
+
+
+def _run_nudge(args: argparse.Namespace) -> int:
+    # Imported lazily: keep `harness --help` / `harness --version` on the stdlib-only
+    # fast path, matching _run_limits / _run_search / _run_task / _run_agents.
+    from harness_cli.nudge import run
 
     return run(args)
 

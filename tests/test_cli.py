@@ -233,3 +233,17 @@ def test_package_import_is_stdlib_only():
         [sys.executable, "-c", code], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_agents_help_lists_live_flag(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["agents", "--help"])
+    help_text = capsys.readouterr().out
+    assert "--live" in help_text
+
+
+def test_top_level_help_lists_nudge(capsys):
+    rc = cli.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "nudge" in out
