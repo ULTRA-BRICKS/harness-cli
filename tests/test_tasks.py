@@ -8,7 +8,7 @@ import urllib.request
 
 import pytest
 
-from harness_cli import cli
+from harness_cli import cli, tasks
 
 _TITLE_263 = "Review documentation diff for performance regressions"
 
@@ -170,3 +170,43 @@ def test_tasks_list_skips_malformed_id(tmp_path, monkeypatch, capsys):
     assert "huge" not in captured.out
 
 
+
+def test_create_ticket_retries_past_id_collision(tmp_path, monkeypatch):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    real_next_id = tasks._next_id
+    calls = {"n": 0}
+
+    def stuck_next_id(store_path):
+        calls["n"] += 1
+        return 1 if calls["n"] <= 2 else real_next_id(store_path)
+
+    monkeypatch.setattr(tasks, "_next_id", stuck_next_id)
+
+    first = tasks.create_ticket("first")
+    second = tasks.create_ticket("second")
+
+    assert first["id"] != second["id"]
+    assert json.loads((store / f"{first['id']}.json").read_text())["title"] == "first"
+    assert json.loads((store / f"{second['id']}.json").read_text())["title"] == "second"
+
+
+def test_create_ticket_exhausted_retries_raises_instead_of_clobbering(tmp_path, monkeypatch):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    original = tasks.create_ticket("original")
+    original_path = store / f"{original['id']}.json"
+    original_bytes = original_path.read_bytes()
+
+    monkeypatch.setattr(tasks, "_next_id", lambda store_path: original["id"])
+
+    with pytest.raises(RuntimeError):
+        tasks.create_ticket("colliding")
+
+    assert original_path.read_bytes() == original_bytes
