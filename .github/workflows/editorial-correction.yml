@@ -1,0 +1,11 @@
+name: Correct issue description language
+on:
+  push:
+    branches: [docs/full-grooming-2026-09-10]
+    paths: [.github/workflows/editorial-correction.yml]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  correct:
+    uses: ultrabricks/rig-cli/.github/workflows/editorial-correction-reusable.yml@8ebe30f4b85f0381665eabd4e9d84cf9bf5342ef
