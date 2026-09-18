@@ -274,7 +274,7 @@ def build_landscape(*, include_all: bool = False, live_only: bool = False) -> di
         "window": window,
         "agents": agents,
         "questions": collect_questions(),
-        "tasks": list_tickets(include_done=include_all),
+        "tasks": list_tickets(include_all=include_all),
     }
 
 

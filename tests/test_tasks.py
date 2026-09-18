@@ -222,3 +222,279 @@ def test_create_ticket_exhausted_retries_raises_instead_of_clobbering(tmp_path, 
         tasks.create_ticket("colliding")
 
     assert original_path.read_bytes() == original_bytes
+
+
+def test_tasks_import_creates_tickets_with_extended_fields(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    import_path.write_text(
+        json.dumps(
+            [
+                {
+                    "title": "Groomed item one",
+                    "body": "Evidence for item one.",
+                    "phase": None,
+                    "group": "rig-core",
+                    "state": "blocked",
+                    "blocked_reason": "tracked as example-repo#1",
+                    "duplicate_of": None,
+                    "source": "grooming-v4",
+                    "external_id": "v4-001",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "1 created, 0 updated, of 1 total" in captured.out
+
+    tickets = tasks.list_tickets(include_all=True)
+    assert len(tickets) == 1
+    ticket = tickets[0]
+    assert ticket["title"] == "Groomed item one"
+    assert ticket["group"] == "rig-core"
+    assert ticket["state"] == "blocked"
+    assert ticket["blocked_reason"] == "tracked as example-repo#1"
+    assert ticket["source"] == "grooming-v4"
+    assert ticket["external_id"] == "v4-001"
+
+
+def test_tasks_import_is_idempotent_on_rerun(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    items = [
+        {
+            "title": f"Groomed item {i}",
+            "body": "",
+            "phase": None,
+            "group": "rig-core",
+            "state": "open",
+            "blocked_reason": None,
+            "duplicate_of": None,
+            "source": "grooming-v4",
+            "external_id": f"v4-{i:03d}",
+        }
+        for i in range(1, 4)
+    ]
+    import_path.write_text(json.dumps(items), encoding="utf-8")
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    first = capsys.readouterr().out
+    assert rc == 0
+    assert "3 created, 0 updated, of 3 total" in first
+    first_ids = sorted(t["id"] for t in tasks.list_tickets(include_all=True))
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    second = capsys.readouterr().out
+    assert rc == 0
+    assert "0 created, 3 updated, of 3 total" in second
+    second_ids = sorted(t["id"] for t in tasks.list_tickets(include_all=True))
+
+    assert first_ids == second_ids
+    assert len(tasks.list_tickets(include_all=True)) == 3
+
+
+def test_tasks_import_updates_existing_ticket_on_changed_fields(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    item = {
+        "title": "Original title",
+        "body": "",
+        "phase": None,
+        "group": "rig-core",
+        "state": "open",
+        "blocked_reason": None,
+        "duplicate_of": None,
+        "source": "grooming-v4",
+        "external_id": "v4-042",
+    }
+    import_path.write_text(json.dumps([item]), encoding="utf-8")
+    cli.main(["tasks", "import", str(import_path)])
+    capsys.readouterr()
+    original_id = tasks.list_tickets(include_all=True)[0]["id"]
+
+    item["title"] = "Updated title"
+    item["state"] = "done"
+    import_path.write_text(json.dumps([item]), encoding="utf-8")
+    rc = cli.main(["tasks", "import", str(import_path)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "0 created, 1 updated, of 1 total" in out
+
+    tickets = tasks.list_tickets(include_all=True)
+    assert len(tickets) == 1
+    assert tickets[0]["id"] == original_id
+    assert tickets[0]["title"] == "Updated title"
+    assert tickets[0]["state"] == "done"
+
+
+def test_tasks_list_default_excludes_blocked_and_duplicate_like_done(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    tasks.create_ticket("open item")
+    tasks.create_ticket("done item", state="done")
+    tasks.create_ticket("blocked item", state="blocked", blocked_reason="x")
+    tasks.create_ticket("duplicate item", state="duplicate", duplicate_of=1)
+    tasks.create_ticket("dropped item", state="dropped", blocked_reason="y")
+
+    rc = cli.main(["tasks", "list"])
+    default_view = capsys.readouterr().out
+    assert rc == 0
+    assert "open item" in default_view
+    assert "done item" not in default_view
+    assert "blocked item" not in default_view
+    assert "duplicate item" not in default_view
+    assert "dropped item" not in default_view
+
+    rc = cli.main(["tasks", "list", "--all"])
+    all_view = capsys.readouterr().out
+    assert rc == 0
+    for title in ("open item", "done item", "blocked item", "duplicate item", "dropped item"):
+        assert title in all_view
+
+
+def test_tasks_import_rejects_invalid_state(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    import_path.write_text(
+        json.dumps(
+            [
+                {
+                    "title": "Bad item",
+                    "body": "",
+                    "state": "not-a-real-state",
+                    "source": "grooming-v4",
+                    "external_id": "v4-999",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "not-a-real-state" in captured.out + captured.err
+    assert tasks.list_tickets(include_all=True) == []
+
+
+def test_tasks_import_rejects_non_dict_item(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    import_path.write_text(
+        json.dumps([{"title": "ok", "source": "s", "external_id": "1"}, "not-an-object"]),
+        encoding="utf-8",
+    )
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "must be a JSON object" in captured.out + captured.err
+    assert tasks.list_tickets(include_all=True) == []
+
+
+def test_tasks_import_falsy_external_id_always_creates_without_crashing(
+    tmp_path, monkeypatch, capsys
+):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    item = {"title": "no key", "source": "grooming-v4", "external_id": ""}
+    import_path.write_text(json.dumps([item]), encoding="utf-8")
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    capsys.readouterr()
+    assert rc == 0
+    assert len(tasks.list_tickets(include_all=True)) == 1
+
+    # Re-running the same file with an empty external_id is not keyed, so it always
+    # creates rather than upserting -- distinct from the (source, external_id) path.
+    rc = cli.main(["tasks", "import", str(import_path)])
+    capsys.readouterr()
+    assert rc == 0
+    assert len(tasks.list_tickets(include_all=True)) == 2
+
+
+def test_tasks_list_skips_corrupt_unhashable_state_instead_of_crashing(
+    tmp_path, monkeypatch, capsys
+):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    store.mkdir(parents=True)
+    (store / "1.json").write_text(
+        json.dumps({"id": 1, "title": "corrupt", "state": []}), encoding="utf-8"
+    )
+
+    rc = cli.main(["tasks", "list"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "corrupt" not in captured.out
+
+    rc = cli.main(["tasks", "list", "--all"])
+    all_captured = capsys.readouterr()
+    assert rc == 0
+    assert "corrupt" in all_captured.out
+
+
+def test_tasks_import_rejects_unhashable_state(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    import_path.write_text(json.dumps([{"title": "x", "state": ["open"]}]), encoding="utf-8")
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "invalid ticket state" in captured.out + captured.err
+    assert tasks.list_tickets(include_all=True) == []
+
+
+def test_tasks_import_non_utf8_file_reports_clean_error(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.bin"
+    import_path.write_bytes(b"\xff\xfe\x00\x01not utf-8")
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "could not read" in captured.out + captured.err
+    assert tasks.list_tickets(include_all=True) == []

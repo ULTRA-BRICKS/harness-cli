@@ -47,17 +47,29 @@ def _add_tasks_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParse
     tasks = sub.add_parser(
         "tasks",
         help="Local process-ticket tracker (not GitHub issues).",
-        description=("Create, list, and close local process tickets. Never files a GitHub issue."),
+        description=(
+            "Create, list, close, and import local process tickets. Never files a GitHub issue."
+        ),
     )
     tasks_sub = tasks.add_subparsers(dest="tasks_command")
     created = tasks_sub.add_parser("new", help="Create a local process ticket.")
     created.add_argument("--title", required=True, help="Ticket title.")
     created.add_argument("--body", default="", help="Optional ticket body.")
     listed = tasks_sub.add_parser("list", help="List local process tickets.")
-    listed.add_argument("--all", action="store_true", help="Include done tickets.")
+    listed.add_argument(
+        "--all",
+        action="store_true",
+        help="Include non-open tickets (done/blocked/duplicate/dropped).",
+    )
     listed.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
     done = tasks_sub.add_parser("done", help="Mark a local process ticket done.")
     done.add_argument("ticket_id", type=int, metavar="ID", help="Ticket id.")
+    imported = tasks_sub.add_parser(
+        "import", help="Idempotently import/upsert tickets from a JSON file."
+    )
+    imported.add_argument(
+        "path", metavar="PATH", help="Path to a JSON file containing a list of ticket objects."
+    )
     return tasks
 
 
@@ -74,7 +86,7 @@ def _add_agents_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentPars
     agents.add_argument(
         "--all",
         action="store_true",
-        help="Disable the 24-hour age window and include done tasks.",
+        help="Disable the 24-hour age window and include non-open tasks.",
     )
     agents.add_argument(
         "--live",
