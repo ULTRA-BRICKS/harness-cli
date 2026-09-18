@@ -58,6 +58,12 @@ def _add_tasks_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParse
     listed.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
     done = tasks_sub.add_parser("done", help="Mark a local process ticket done.")
     done.add_argument("ticket_id", type=int, metavar="ID", help="Ticket id.")
+    imported = tasks_sub.add_parser(
+        "import", help="Idempotently import/upsert tickets from a JSON file."
+    )
+    imported.add_argument(
+        "path", metavar="PATH", help="Path to a JSON file containing a list of ticket objects."
+    )
     return tasks
 
 

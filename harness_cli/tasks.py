@@ -1,13 +1,13 @@
 """Local process-ticket tracker so agent/session work stays off product GitHub.
 
-Accessed via: `harness tasks new|list|done` -> cli._run_tasks -> this module.
+Accessed via: `harness tasks new|list|done|import` -> cli._run_tasks -> this module.
 
 Assumptions: tickets are local JSON files only. This module never calls `gh`,
 never hits api.github.com, and never inspects the cwd git remote. Store path is
 $HARNESS_TASK_DIR, else $XDG_STATE_HOME/harness-cli/tasks, else
 ~/.local/state/harness-cli/tasks.
 
-Past bugs: conloca/landing#263 — a process ticket titled "Review documentation
+Past bugs: conloca/landing#263 -- a process ticket titled "Review documentation
 diff for performance regressions" was filed as a GitHub issue in a product
 repo. Guarded by
 tests/test_tasks.py::test_process_ticket_does_not_create_github_product_issue.
@@ -100,7 +100,40 @@ def _ticket_id(payload: dict) -> int | None:
     return number
 
 
-def create_ticket(title: str, body: str = "") -> dict:
+_VALID_STATES = frozenset({"open", "done", "blocked", "duplicate", "dropped"})
+
+# Default `tasks list` visibility: only "open" tickets, matching the shipped default of
+# hiding "done". Explicit allow-list (not `state != "open"`) so a newly added state
+# (blocked, duplicate, dropped) can never silently leak into the default view the way an
+# implicit exclusion list would - `--all` is required to see anything non-open.
+_DEFAULT_LIST_STATES = frozenset({"open"})
+
+
+def _validate_state(state: str) -> str:
+    if state not in _VALID_STATES:
+        raise ValueError(f"invalid ticket state {state!r}; must be one of {sorted(_VALID_STATES)}")
+    return state
+
+
+# The mutable grooming-import fields shared by `_update_ticket` and `import_tickets`'
+# create path. One source of truth so adding a field can't update one writer and
+# forget the other (past review finding: these were hand-listed independently in
+# three places and could silently drift).
+_GROOMING_FIELDS = ("phase", "group", "blocked_reason", "duplicate_of")
+
+
+def create_ticket(
+    title: str,
+    body: str = "",
+    *,
+    state: str = "open",
+    phase: str | None = None,
+    group: str | None = None,
+    blocked_reason: str | None = None,
+    duplicate_of: int | None = None,
+    source: str | None = None,
+    external_id: str | None = None,
+) -> dict:
     """Reserve a ticket id and write it exclusively, retrying past collisions.
 
     Past bug (#8): `_next_id` (scan-then-write) combined with `_atomic_write`
@@ -109,7 +142,12 @@ def create_ticket(title: str, body: str = "") -> dict:
     error. Exclusive create (O_CREAT|O_EXCL) turns that race into a retry
     with a fresh id, and a bounded number of collisions into a clear error
     instead of a silent lost update.
+
+    `phase`/`group`/`blocked_reason`/`duplicate_of`/`source`/`external_id` are additive
+    fields (all optional, default null) used by grooming-backlog imports (see
+    `import_tickets`); a hand-created `tasks new` ticket simply leaves them null.
     """
+    _validate_state(state)
     store = task_dir()
     store.mkdir(parents=True, exist_ok=True)
     last_error: FileExistsError | None = None
@@ -119,10 +157,16 @@ def create_ticket(title: str, body: str = "") -> dict:
             "id": ticket_id,
             "title": title,
             "body": body,
-            "state": "open",
+            "state": state,
             "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "session": os.environ.get("TASK_SESSION") or "",
             "labels": _labels(),
+            "phase": phase,
+            "group": group,
+            "blocked_reason": blocked_reason,
+            "duplicate_of": duplicate_of,
+            "source": source,
+            "external_id": external_id,
         }
         try:
             _exclusive_write(store / f"{ticket_id}.json", ticket)
@@ -137,6 +181,13 @@ def create_ticket(title: str, body: str = "") -> dict:
 
 
 def list_tickets(include_done: bool = False) -> list[dict]:
+    """List tickets.
+
+    Default view is the explicit allow-list `_DEFAULT_LIST_STATES` (open only);
+    `include_done=True` (the CLI's `--all`) returns every state, including tickets an
+    older, field-less ticket file predates this module's schema for (missing fields
+    read back as absent via `.get(...)`, never a crash).
+    """
     store = task_dir()
     if not store.is_dir():
         return []
@@ -148,7 +199,7 @@ def list_tickets(include_done: bool = False) -> list[dict]:
             continue
         if not isinstance(payload, dict):
             continue
-        if not include_done and payload.get("state") != "open":
+        if not include_done and payload.get("state") not in _DEFAULT_LIST_STATES:
             continue
         if _ticket_id(payload) is None:
             continue
@@ -172,6 +223,95 @@ def mark_done(ticket_id: int) -> dict | None:
     return payload
 
 
+def _update_ticket(ticket_id: int, item: dict) -> dict | None:
+    """Overwrite an existing ticket's mutable fields from an import record in place.
+
+    Never touches `id`/`created_at`/`session`/`labels`/`source`/`external_id` - those
+    are the ticket's identity, not import payload.
+    """
+    path = task_dir() / f"{ticket_id}.json"
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    payload["title"] = item.get("title", "")
+    payload["body"] = item.get("body", "")
+    payload["state"] = item.get("state", "open")
+    for field in _GROOMING_FIELDS:
+        payload[field] = item.get(field)
+    _atomic_write(path, payload)
+    return payload
+
+
+def import_tickets(items: list[dict]) -> dict:
+    """Idempotently upsert tickets from a list of import records.
+
+    Each item is a dict with `title`, `body`, `phase`, `group`, `state`,
+    `blocked_reason`, `duplicate_of`, `source`, `external_id`. An item whose
+    (`source`, `external_id`) pair matches an existing ticket updates that ticket in
+    place (never creates a second one for the same external id); otherwise a new
+    ticket is created. Re-running the same import file is therefore a no-op on the
+    second pass. Validates every item's shape and `state` before writing anything, so
+    a single bad record fails the whole import instead of partially applying it.
+
+    An item with a missing `source` or `external_id` has no dedup identity and is
+    always created (never upserted) - re-running such a record duplicates it, so
+    every import record MUST carry both. Single-writer assumption: concurrent
+    `import_tickets` calls race on the same in-memory dedup snapshot the way
+    concurrent `tasks new` calls used to race on ticket ids (see the `create_ticket`
+    docstring); this module has no cross-process import lock.
+    """
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"import item {index} must be a JSON object, got {type(item).__name__}"
+            )
+        try:
+            _validate_state(item.get("state", "open"))
+        except ValueError as exc:
+            raise ValueError(
+                f"import item {index} (external_id={item.get('external_id')!r}): {exc}"
+            ) from exc
+
+    store = task_dir()
+    store.mkdir(parents=True, exist_ok=True)
+    index_by_key: dict[tuple[str, str], dict] = {}
+    for ticket in list_tickets(include_done=True):
+        source = ticket.get("source")
+        external_id = ticket.get("external_id")
+        if source is not None and external_id is not None:
+            index_by_key[(source, external_id)] = ticket
+
+    created = 0
+    updated = 0
+    for item in items:
+        source = item.get("source")
+        external_id = item.get("external_id")
+        has_key = source is not None and external_id is not None
+        key = (source, external_id) if has_key else None
+        existing = index_by_key.get(key) if key is not None else None
+        if existing is not None:
+            _update_ticket(existing["id"], item)
+            updated += 1
+        else:
+            new_ticket = create_ticket(
+                item.get("title", ""),
+                item.get("body", ""),
+                state=item.get("state", "open"),
+                source=source,
+                external_id=external_id,
+                **{field: item.get(field) for field in _GROOMING_FIELDS},
+            )
+            if key is not None:
+                index_by_key[key] = new_ticket
+            created += 1
+    return {"created": created, "updated": updated, "total": len(items)}
+
+
 def _cmd_new(args: argparse.Namespace) -> int:
     try:
         ticket = create_ticket(args.title, args.body or "")
@@ -179,6 +319,33 @@ def _cmd_new(args: argparse.Namespace) -> int:
         print(_sanitize(str(exc)), file=sys.stderr)
         return 1
     print(_sanitize(str(ticket["title"])))
+    return 0
+
+
+def _cmd_import(args: argparse.Namespace) -> int:
+    try:
+        raw = Path(args.path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        print(_sanitize(f"could not read {args.path}: {exc}"), file=sys.stderr)
+        return 1
+    try:
+        items = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(_sanitize(f"invalid JSON in {args.path}: {exc}"), file=sys.stderr)
+        return 1
+    if not isinstance(items, list):
+        print(
+            _sanitize(f"{args.path} must contain a JSON array of ticket objects"), file=sys.stderr
+        )
+        return 1
+    try:
+        summary = import_tickets(items)
+    except (ValueError, RuntimeError) as exc:
+        print(_sanitize(str(exc)), file=sys.stderr)
+        return 1
+    print(
+        f"{summary['created']} created, {summary['updated']} updated, of {summary['total']} total"
+    )
     return 0
 
 
@@ -212,4 +379,6 @@ def run(args: argparse.Namespace) -> int:
         return _cmd_list(args)
     if command == "done":
         return _cmd_done(args)
+    if command == "import":
+        return _cmd_import(args)
     return 0

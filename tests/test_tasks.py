@@ -29,6 +29,7 @@ def test_tasks_help_lists_new_list_done(capsys):
     assert "new" in help_text
     assert "list" in help_text
     assert "done" in help_text
+    assert "import" in help_text
 
 
 def test_old_singular_task_command_is_gone(capsys):
@@ -72,9 +73,7 @@ def test_process_ticket_does_not_create_github_product_issue(tmp_path, monkeypat
 
     gh = bin_dir / "gh"
     gh.write_text(
-        "#!/bin/sh\n"
-        f"printf invoked > {sentinel.as_posix()!r}\n"
-        "exit 0\n",
+        f"#!/bin/sh\nprintf invoked > {sentinel.as_posix()!r}\nexit 0\n",
         encoding="utf-8",
     )
     gh.chmod(gh.stat().st_mode | stat.S_IXUSR)
@@ -182,7 +181,6 @@ def test_tasks_list_skips_malformed_id(tmp_path, monkeypatch, capsys):
     assert "huge" not in captured.out
 
 
-
 def test_create_ticket_retries_past_id_collision(tmp_path, monkeypatch):
     store = tmp_path / "tasks"
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
@@ -222,3 +220,220 @@ def test_create_ticket_exhausted_retries_raises_instead_of_clobbering(tmp_path, 
         tasks.create_ticket("colliding")
 
     assert original_path.read_bytes() == original_bytes
+
+
+def test_tasks_import_creates_tickets_with_extended_fields(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    import_path.write_text(
+        json.dumps(
+            [
+                {
+                    "title": "Groomed item one",
+                    "body": "Evidence for item one.",
+                    "phase": None,
+                    "group": "rig-core",
+                    "state": "blocked",
+                    "blocked_reason": "tracked as example-repo#1",
+                    "duplicate_of": None,
+                    "source": "grooming-v4",
+                    "external_id": "v4-001",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "1 created, 0 updated, of 1 total" in captured.out
+
+    tickets = tasks.list_tickets(include_done=True)
+    assert len(tickets) == 1
+    ticket = tickets[0]
+    assert ticket["title"] == "Groomed item one"
+    assert ticket["group"] == "rig-core"
+    assert ticket["state"] == "blocked"
+    assert ticket["blocked_reason"] == "tracked as example-repo#1"
+    assert ticket["source"] == "grooming-v4"
+    assert ticket["external_id"] == "v4-001"
+
+
+def test_tasks_import_is_idempotent_on_rerun(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    items = [
+        {
+            "title": f"Groomed item {i}",
+            "body": "",
+            "phase": None,
+            "group": "rig-core",
+            "state": "open",
+            "blocked_reason": None,
+            "duplicate_of": None,
+            "source": "grooming-v4",
+            "external_id": f"v4-{i:03d}",
+        }
+        for i in range(1, 4)
+    ]
+    import_path.write_text(json.dumps(items), encoding="utf-8")
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    first = capsys.readouterr().out
+    assert rc == 0
+    assert "3 created, 0 updated, of 3 total" in first
+    first_ids = sorted(t["id"] for t in tasks.list_tickets(include_done=True))
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    second = capsys.readouterr().out
+    assert rc == 0
+    assert "0 created, 3 updated, of 3 total" in second
+    second_ids = sorted(t["id"] for t in tasks.list_tickets(include_done=True))
+
+    assert first_ids == second_ids
+    assert len(tasks.list_tickets(include_done=True)) == 3
+
+
+def test_tasks_import_updates_existing_ticket_on_changed_fields(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    item = {
+        "title": "Original title",
+        "body": "",
+        "phase": None,
+        "group": "rig-core",
+        "state": "open",
+        "blocked_reason": None,
+        "duplicate_of": None,
+        "source": "grooming-v4",
+        "external_id": "v4-042",
+    }
+    import_path.write_text(json.dumps([item]), encoding="utf-8")
+    cli.main(["tasks", "import", str(import_path)])
+    capsys.readouterr()
+    original_id = tasks.list_tickets(include_done=True)[0]["id"]
+
+    item["title"] = "Updated title"
+    item["state"] = "done"
+    import_path.write_text(json.dumps([item]), encoding="utf-8")
+    rc = cli.main(["tasks", "import", str(import_path)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "0 created, 1 updated, of 1 total" in out
+
+    tickets = tasks.list_tickets(include_done=True)
+    assert len(tickets) == 1
+    assert tickets[0]["id"] == original_id
+    assert tickets[0]["title"] == "Updated title"
+    assert tickets[0]["state"] == "done"
+
+
+def test_tasks_list_default_excludes_blocked_and_duplicate_like_done(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    tasks.create_ticket("open item")
+    tasks.create_ticket("done item", state="done")
+    tasks.create_ticket("blocked item", state="blocked", blocked_reason="x")
+    tasks.create_ticket("duplicate item", state="duplicate", duplicate_of=1)
+    tasks.create_ticket("dropped item", state="dropped", blocked_reason="y")
+
+    rc = cli.main(["tasks", "list"])
+    default_view = capsys.readouterr().out
+    assert rc == 0
+    assert "open item" in default_view
+    assert "done item" not in default_view
+    assert "blocked item" not in default_view
+    assert "duplicate item" not in default_view
+    assert "dropped item" not in default_view
+
+    rc = cli.main(["tasks", "list", "--all"])
+    all_view = capsys.readouterr().out
+    assert rc == 0
+    for title in ("open item", "done item", "blocked item", "duplicate item", "dropped item"):
+        assert title in all_view
+
+
+def test_tasks_import_rejects_invalid_state(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    import_path.write_text(
+        json.dumps(
+            [
+                {
+                    "title": "Bad item",
+                    "body": "",
+                    "state": "not-a-real-state",
+                    "source": "grooming-v4",
+                    "external_id": "v4-999",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "not-a-real-state" in captured.out + captured.err
+    assert tasks.list_tickets(include_done=True) == []
+
+
+def test_tasks_import_rejects_non_dict_item(tmp_path, monkeypatch, capsys):
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    import_path.write_text(
+        json.dumps([{"title": "ok", "external_id": "v4-1", "source": "s"}, None]), encoding="utf-8"
+    )
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "must be a JSON object" in captured.out + captured.err
+    assert tasks.list_tickets(include_done=True) == []
+
+
+def test_tasks_import_without_external_id_creates_new_ticket_every_run(
+    tmp_path, monkeypatch, capsys
+):
+    # Records missing source/external_id have no dedup identity, so import_tickets
+    # cannot upsert them - each run creates a fresh ticket rather than silently
+    # matching an unrelated one on a coincidental key collision.
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    import_path.write_text(json.dumps([{"title": "keyless item", "body": ""}]), encoding="utf-8")
+
+    cli.main(["tasks", "import", str(import_path)])
+    capsys.readouterr()
+    cli.main(["tasks", "import", str(import_path)])
+    out = capsys.readouterr().out
+
+    assert "1 created, 0 updated, of 1 total" in out
+    assert len(tasks.list_tickets(include_done=True)) == 2
