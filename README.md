@@ -31,6 +31,7 @@ harness search QUERY [--days N]
 harness tasks new --title TITLE [--body BODY]
 harness tasks list [--all] [--json]
 harness tasks done ID
+harness tasks import PATH
 harness agents [--json] [--all] [--live]
 harness agents web [--host H] [--port N] [--no-open]
 harness nudge AGENT_ID MESSAGE [--json] [--timeout-ms N]
@@ -46,11 +47,15 @@ harness nudge AGENT_ID MESSAGE [--json] [--timeout-ms N]
 - `search` finds user messages in Claude Code and Oh My Pi *parent* session transcripts
   (`QUERY` is a case-insensitive substring; `--days` defaults to 3, `0` disables).
 - `tasks` is the local process-ticket tracker for agent/session work; it writes JSON under
-  `$HARNESS_TASK_DIR` (else XDG/state) and never files a GitHub issue.
+  `$HARNESS_TASK_DIR` (else XDG/state) and never files a GitHub issue. States are
+  `open`/`done`/`blocked`/`duplicate`/`dropped`; `list` defaults to `open` only, `--all`
+  shows every state. `tasks import PATH` idempotently upserts tickets from a JSON array
+  keyed on `(source, external_id)`, printing created/updated/total counts.
 - `agents` lists OMP and Claude Code parent + nested sessions, pending tg-ctl questions,
   and open harness tasks. Default age window is 24 hours (`--all` disables it and includes
-  done tasks). Live vs parked is an mtime heuristic (under 10 minutes is live), never a
-  process-liveness API. `agents web` serves a local page at http://127.0.0.1:7888
+  done, blocked, duplicate, and dropped tasks). Live vs parked is an mtime heuristic (under
+  10 minutes is live), never a process-liveness API. `agents web` serves a local page at
+  http://127.0.0.1:7888
   (`--port 0` binds ephemeral; `--no-open` skips the browser) with links to the review
   dashboard (7878), spec-web (7920), rig config-web (8787), rig evolve (8797), and 3d web
   (8733).

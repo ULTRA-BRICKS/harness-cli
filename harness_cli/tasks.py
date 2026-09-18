@@ -115,11 +115,63 @@ def _validate_state(state: str) -> str:
     return state
 
 
-# The mutable grooming-import fields shared by `_update_ticket` and `import_tickets`'
-# create path. One source of truth so adding a field can't update one writer and
-# forget the other (past review finding: these were hand-listed independently in
-# three places and could silently drift).
-_GROOMING_FIELDS = ("phase", "group", "blocked_reason", "duplicate_of")
+# Single source of truth for the import-record schema, split by shared purpose so
+# `_GROOMING_FIELDS` (create_ticket/`_update_ticket` payload) and
+# `_STRING_OR_NONE_IMPORT_FIELDS` (`_validate_import_item` type-checking) derive from
+# the same base tuples instead of hand-listing overlapping field names independently
+# (past review finding: three - now four - separately maintained lists silently drift).
+_STRING_OR_NONE_MUTABLE_FIELDS = ("phase", "group", "blocked_reason")
+_STRING_OR_NONE_IDENTITY_FIELDS = ("source", "external_id")
+_INT_OR_NONE_FIELDS = ("duplicate_of",)
+
+_GROOMING_FIELDS = _STRING_OR_NONE_MUTABLE_FIELDS + _INT_OR_NONE_FIELDS
+_STRING_OR_NONE_IMPORT_FIELDS = _STRING_OR_NONE_MUTABLE_FIELDS + _STRING_OR_NONE_IDENTITY_FIELDS
+
+
+def _reject(index: int, item: dict, message: str) -> None:
+    """Raise a `ValueError` for import item `index`, tagged with its `external_id`.
+
+    Every `_validate_import_item` failure routes through here so an operator
+    debugging a large grooming-backlog file always gets the same locating context,
+    regardless of which field tripped the check.
+    """
+    raise ValueError(f"import item {index} (external_id={item.get('external_id')!r}): {message}")
+
+
+def _validate_import_item(index: int, item: dict) -> None:
+    """Type/shape-check one import record before any ticket write.
+
+    Guards against non-hashable or wrong-typed JSON values (arrays/objects/numbers,
+    or a JSON boolean masquerading as `duplicate_of`) reaching `_validate_state`'s
+    frozenset membership check or the `(source, external_id)` dict key in
+    `import_tickets` - both would otherwise raise a raw `TypeError` mid-import, after
+    earlier records in the same file were already written to disk.
+    """
+    if "title" not in item:
+        _reject(index, item, "'title' is required")
+    title = item.get("title")
+    if not isinstance(title, str):
+        _reject(index, item, f"'title' must be a string, got {type(title).__name__}")
+    body = item.get("body", "")
+    if not isinstance(body, str):
+        _reject(index, item, f"'body' must be a string, got {type(body).__name__}")
+    for field in _STRING_OR_NONE_IMPORT_FIELDS:
+        value = item.get(field)
+        if value is not None and not isinstance(value, str):
+            _reject(index, item, f"{field!r} must be a string or null, got {type(value).__name__}")
+    for field in _INT_OR_NONE_FIELDS:
+        value = item.get(field)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+            _reject(
+                index, item, f"{field!r} must be an integer or null, got {type(value).__name__}"
+            )
+    state = item.get("state", "open")
+    if not isinstance(state, str):
+        _reject(index, item, f"'state' must be a string, got {type(state).__name__}")
+    try:
+        _validate_state(state)
+    except ValueError as exc:
+        _reject(index, item, str(exc))
 
 
 def create_ticket(
@@ -250,13 +302,18 @@ def _update_ticket(ticket_id: int, item: dict) -> dict | None:
 def import_tickets(items: list[dict]) -> dict:
     """Idempotently upsert tickets from a list of import records.
 
-    Each item is a dict with `title`, `body`, `phase`, `group`, `state`,
-    `blocked_reason`, `duplicate_of`, `source`, `external_id`. An item whose
-    (`source`, `external_id`) pair matches an existing ticket updates that ticket in
-    place (never creates a second one for the same external id); otherwise a new
-    ticket is created. Re-running the same import file is therefore a no-op on the
-    second pass. Validates every item's shape and `state` before writing anything, so
-    a single bad record fails the whole import instead of partially applying it.
+    Each item is a dict with a required `title` plus optional `body`, `phase`,
+    `group`, `state`, `blocked_reason`, `duplicate_of`, `source`, `external_id`. An
+    item whose (`source`, `external_id`) pair matches an existing ticket updates that
+    ticket in place (never creates a second one for the same external id); otherwise
+    a new ticket is created. Re-running the same import file is therefore a no-op on
+    the second pass. Validates every item's shape and `state` before writing
+    anything, so a single bad record fails the whole import instead of partially
+    applying it.
+
+    `title` is required (rejected if absent or null) so an upsert can never silently
+    blank an existing ticket's title; every other field defaults to empty/null when
+    absent, matching a full-record replace rather than a partial patch.
 
     An item with a missing `source` or `external_id` has no dedup identity and is
     always created (never upserted) - re-running such a record duplicates it, so
@@ -270,12 +327,7 @@ def import_tickets(items: list[dict]) -> dict:
             raise ValueError(
                 f"import item {index} must be a JSON object, got {type(item).__name__}"
             )
-        try:
-            _validate_state(item.get("state", "open"))
-        except ValueError as exc:
-            raise ValueError(
-                f"import item {index} (external_id={item.get('external_id')!r}): {exc}"
-            ) from exc
+        _validate_import_item(index, item)
 
     store = task_dir()
     store.mkdir(parents=True, exist_ok=True)
@@ -295,7 +347,12 @@ def import_tickets(items: list[dict]) -> dict:
         key = (source, external_id) if has_key else None
         existing = index_by_key.get(key) if key is not None else None
         if existing is not None:
-            _update_ticket(existing["id"], item)
+            if _update_ticket(existing["id"], item) is None:
+                raise RuntimeError(
+                    f"ticket {existing['id']} (external_id={external_id!r}) vanished "
+                    "during import - its store file was deleted or corrupted between "
+                    "the dedup scan and the write"
+                )
             updated += 1
         else:
             new_ticket = create_ticket(
