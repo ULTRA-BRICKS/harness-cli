@@ -197,6 +197,68 @@ def test_limits_all_does_not_fake_percent_from_transcripts(tmp_path, monkeypatch
     assert "missing credentials" in out.lower() or "not guessed" in out.lower()
 
 
+def test_limits_distinct_windows_show_real_percent_not_raw_counts(tmp_path, monkeypatch, capsys):
+    """Session=15% / Weekly=87% must render and serialize as-is.
+
+    Each window also carries raw token counts that are inversely correlated
+    with its real percent (Session: huge counts but low percent; Weekly: tiny
+    counts but high percent). If the renderer or JSON serializer ever derived
+    a shown number from token counts instead of the provider's percent field,
+    or if one window's value leaked into another, this fixture would expose
+    it immediately: a count-derived or collapsed number can't coincidentally
+    match 15% and 87% in the correct, non-swapped positions.
+    """
+    _isolate_home(tmp_path, monkeypatch)
+    _write_claude_live(tmp_path)
+
+    payload = {
+        "five_hour": {
+            "utilization": 15.0,
+            "resets_at": _RESET,
+            "input_tokens": 900_000,
+            "output_tokens": 850_000,
+        },
+        "seven_day": {
+            "utilization": 87.0,
+            "resets_at": _WEEKLY_RESET,
+            "input_tokens": 500,
+            "output_tokens": 200,
+        },
+    }
+
+    def fake_urlopen(req, timeout=None):
+        url = getattr(req, "full_url", None) or str(req)
+        if "api.anthropic.com" in url and "oauth/usage" in url:
+            return _Resp(payload)
+        raise RuntimeError(f"unexpected url in unit test: {url}")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    rc = cli.main(["limits", "--all"])
+    out = capsys.readouterr().out
+    assert rc == 0
+
+    lines = out.splitlines()
+    session_line = next(line for line in lines if line.strip().startswith("Session"))
+    weekly_line = next(line for line in lines if line.strip().startswith("Weekly"))
+    assert "15% used" in session_line
+    assert "87% used" not in session_line
+    assert "87% used" in weekly_line
+    assert "15% used" not in weekly_line
+    assert "900" not in out
+    assert "850" not in out
+
+    rc = cli.main(["limits", "--all", "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    claude = next(c for c in data["cards"] if c["provider"] == "Claude Code")
+    by_name = {w["name"]: w for w in claude["windows"]}
+    assert by_name["Session"]["used_percent"] == 15.0
+    assert by_name["Weekly"]["used_percent"] == 87.0
+    assert set(by_name["Session"].keys()) == {"name", "used_percent", "resets_at", "window_seconds"}
+    assert set(by_name["Weekly"].keys()) == {"name", "used_percent", "resets_at", "window_seconds"}
+
+
 def test_limits_all_rejects_huge_finite_window_hours(capsys):
     # 1e308 is finite (passes math.isfinite) but overflows timedelta(hours=...) with
     # "OverflowError: Python int too large to convert to C int" - must be rejected by
