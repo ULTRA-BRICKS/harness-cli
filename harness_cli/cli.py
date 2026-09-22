@@ -131,6 +131,36 @@ def _add_nudge_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParse
     return nudge
 
 
+def _add_stats_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    stats = sub.add_parser(
+        "stats",
+        help="Review/fix iterations, follow-up chains, and best-effort token usage for a ticket.",
+        description=(
+            "Report review-iteration counts (gh), follow-up chains (task), and best-effort "
+            "local-transcript token usage (this repo's own transcript search) for one product "
+            "ticket, or every closed ticket in a repo with --all. Read-only: shells out to the "
+            "already-installed task and gh binaries; never writes to either."
+        ),
+    )
+    stats.add_argument(
+        "ticket_ref",
+        nargs="?",
+        default=None,
+        metavar="TICKET",
+        help="Ticket reference: owner/repo#N, or a bare N (needs --repo or a git origin remote).",
+    )
+    stats.add_argument(
+        "--repo", help="owner/name override; required for --all without a git remote."
+    )
+    stats.add_argument(
+        "--all",
+        action="store_true",
+        help="Report every closed ticket in --repo (or the git remote's repo) plus a summary.",
+    )
+    stats.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
+    return stats
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness",
@@ -191,6 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.tasks_parser = _add_tasks_parser(sub)
     parser.agents_parser = _add_agents_parser(sub)
     parser.nudge_parser = _add_nudge_parser(sub)
+    parser.stats_parser = _add_stats_parser(sub)
     return parser
 
 
@@ -215,6 +246,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_agents(args)
     if args.command == "nudge":
         return _run_nudge(args)
+    if args.command == "stats":
+        return _run_stats(args)
 
     parser.print_help()
     return 1
@@ -253,6 +286,14 @@ def _run_nudge(args: argparse.Namespace) -> int:
     # Imported lazily: keep `harness --help` / `harness --version` on the stdlib-only
     # fast path, matching _run_limits / _run_search / _run_task / _run_agents.
     from harness_cli.nudge import run
+
+    return run(args)
+
+
+def _run_stats(args: argparse.Namespace) -> int:
+    # Imported lazily: keep `harness --help` / `harness --version` on the stdlib-only
+    # fast path, matching _run_limits / _run_search / _run_tasks / _run_agents / _run_nudge.
+    from harness_cli.stats import run
 
     return run(args)
 
