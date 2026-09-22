@@ -182,3 +182,70 @@ def test_top_level_help_lists_search(capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "search" in out
+
+
+def test_build_transcript_corpus_indexes_cc_and_omp_user_text(tmp_path, monkeypatch):
+    _isolate_home(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc)
+    cc_path = tmp_path / ".claude" / "projects" / "-proj" / "sess.jsonl"
+    _write_jsonl(cc_path, [_cc_user(now, "working on ticket-42 things")])
+    omp_path = tmp_path / ".omp" / "agent" / "sessions" / "-proj" / "sess.jsonl"
+    _write_jsonl(omp_path, [_omp_user(now, "omp session mentions #7")])
+
+    from harness_cli.search import build_transcript_corpus, paths_matching_id, paths_matching_text
+
+    corpus = build_transcript_corpus()
+
+    assert cc_path in corpus
+    assert "ticket-42" in corpus[cc_path].text
+    assert omp_path in corpus
+    assert "#7" in corpus[omp_path].id_tokens
+    assert paths_matching_text(corpus, "ticket-42") == [cc_path]
+    assert paths_matching_id(corpus, "7") == [omp_path]
+    assert paths_matching_id(corpus, "21") == []
+    assert paths_matching_text(corpus, "no such needle") == []
+
+
+def test_paths_matching_id_never_matches_a_longer_number(tmp_path, monkeypatch):
+    # "#2" must never match a file that only mentions "#21"/"#200" - a real review finding.
+    _isolate_home(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc)
+    path = tmp_path / ".claude" / "projects" / "-proj" / "sess.jsonl"
+    _write_jsonl(path, [_cc_user(now, "fixed #21 and #200 today")])
+
+    from harness_cli.search import build_transcript_corpus, paths_matching_id
+
+    corpus = build_transcript_corpus()
+
+    assert paths_matching_id(corpus, "2") == []
+    assert paths_matching_id(corpus, "21") == [path]
+    assert paths_matching_id(corpus, "200") == [path]
+
+
+def test_build_transcript_corpus_excludes_assistant_and_nested_subagent(tmp_path, monkeypatch):
+    _isolate_home(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc)
+    path = tmp_path / ".claude" / "projects" / "-proj" / "sess.jsonl"
+    _write_jsonl(
+        path,
+        [
+            _cc_user(now, "real user needle"),
+            {
+                "type": "assistant",
+                "timestamp": _iso(now + timedelta(seconds=1)),
+                "message": {"role": "assistant", "content": "assistant needle"},
+            },
+        ],
+    )
+    nested_path = (
+        tmp_path / ".claude" / "projects" / "-proj" / "sess" / "subagents" / "agent-abc.jsonl"
+    )
+    _write_jsonl(nested_path, [_cc_user(now, "hidden nested needle")])
+
+    from harness_cli.search import build_transcript_corpus
+
+    corpus = build_transcript_corpus()
+
+    assert "real user needle" in corpus[path].text
+    assert "assistant needle" not in corpus[path].text
+    assert nested_path not in corpus

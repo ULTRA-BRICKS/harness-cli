@@ -35,6 +35,8 @@ harness tasks import PATH
 harness agents [--json] [--all] [--live]
 harness agents web [--host H] [--port N] [--no-open]
 harness nudge AGENT_ID MESSAGE [--json] [--timeout-ms N]
+harness stats TICKET [--repo owner/name] [--json]
+harness stats --all [--repo owner/name] [--json]
 ```
 
 - `--all` — every known account/provider on this machine (Claude Code slots,
@@ -73,6 +75,16 @@ harness nudge AGENT_ID MESSAGE [--json] [--timeout-ms N]
   over argv/stdout, not a daemon: harness-cli is stdlib-only, one-shot argparse, with
   zero daemon infra, and this is fire-and-forget (at most once per silence episode),
   not a chat loop.
+- `stats` reports, for one PRODUCT ticket (not a `tasks` local process ticket), review/fix
+  iteration counts, its follow-up chain, and best-effort local-transcript token usage.
+  `TICKET` is `owner/repo#N` or a bare `N` (needs `--repo`, or a git origin remote in the
+  current directory that resolves to one). `--all` reports every CLOSED ticket in the repo
+  plus an aggregate summary (review-iteration buckets, count with a follow-up, count with
+  token data) instead of one ticket — a calibration dataset, not a story-point suggestion
+  (that's `task classify`'s job). Every stat is independently fail-closed with its own
+  `*_reason` field: a missing `task`/`gh` binary, an unresolved ticket, no matching PR, or
+  no local transcript match never collapses into a fake `0`/empty result — see "Data
+  sources" below.
 
 ## Data sources (real % only)
 
@@ -86,6 +98,15 @@ harness nudge AGENT_ID MESSAGE [--json] [--timeout-ms N]
 
 Claude Code slots scanned: `~/.claude` plus `~/.claude-accounts/account-{0,1,2}`.
 On macOS the Keychain token is preferred when `~/.claude/.credentials.json` is stale.
+
+### Data sources (`stats` command — never a fake number, either)
+
+| Stat | Source | Fail-closed when |
+| --- | --- | --- |
+| Follow-up chain | `task read <id> --repo <owner/repo> --json` (sibling task-cli, read-only); greps the returned `links` dict for `"Followed up by #<id>"` keys | `task` not on PATH; ticket id doesn't resolve; ticket genuinely has no follow-up link (reported as `followups: []` with no reason — distinct from a lookup failure, which always carries a reason) |
+| Review iterations | `gh pr list --search "<id> in:body" --repo <owner/repo> --json number` then `gh pr view <n> --json reviews,commits`; counted as the number of `CHANGES_REQUESTED` reviews (documented proxy — see `stats.count_review_iterations`'s docstring for its known blind spot) | `gh` not on PATH; no PR found referencing the ticket |
+| Token usage | Reuses `harness_cli.search`'s existing local Claude Code/OMP transcript scan for the ticket id or its title, then sums real `harness_cli.transcripts` `SessionUsage` token fields across matches — never estimated | No local transcript mentions the ticket |
+
 
 
 ## Architecture
@@ -103,6 +124,10 @@ On macOS the Keychain token is preferred when `~/.claude/.credentials.json` is s
 - `harness_cli/omp_acp.py` — omp ACP JSON-RPC client (NDJSON framing over `omp acp`
   stdio); the one real `KIND_HANDLERS` implementation.
 - `harness_cli/agents_web.py` — local live landscape web view (ThreadingHTTPServer + SSE).
+- `harness_cli/stats.py` — `stats` command: review/fix iteration counts (`gh`),
+  follow-up chains (`task`), and best-effort transcript token usage (reuses
+  `harness_cli/search.py` + `harness_cli/transcripts.py`); subprocess work is
+  lazy-imported inside `_run_stats` so `harness --help` stays stdlib-only.
 - Stdlib only (no rich). Unicode bars (`█` / `░`). ANSI green below 90%, red at
   ≥90%. Honors `NO_COLOR` / `FORCE_COLOR` / isatty.
 
