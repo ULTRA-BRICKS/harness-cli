@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "harness-cli"
+name = "hyper-harness"
 version = "0.6.0"
 description = "Real rate-limit proximity (percent used, reset, pace) for Claude Code, Codex, z.ai, x.ai, and kimi accounts on this machine."
 readme = "README.md"
