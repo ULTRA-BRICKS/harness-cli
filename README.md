@@ -59,6 +59,7 @@ harness agents web [--host H] [--port N] [--no-open]
 harness nudge AGENT_ID MESSAGE [--json] [--timeout-ms N]
 harness stats TICKET [--repo owner/name] [--json]
 harness stats --all [--repo owner/name] [--json]
+harness codex update [--path P] [--backup-dir D] [--probe-timeout S] [-- UPDATER...]
 ```
 
 - `--all` — every known account/provider on this machine (Claude Code slots,
@@ -107,6 +108,34 @@ harness stats --all [--repo owner/name] [--json]
   `*_reason` field: a missing `task`/`gh` binary, an unresolved ticket, no matching PR, or
   no local transcript match never collapses into a fake `0`/empty result — see "Data
   sources" below.
+- `codex update` is the safe Codex updater — see "Codex update" below.
+
+## Codex update
+
+`harness codex update` backs up the currently working `codex`, runs the updater
+(`brew upgrade --cask codex` by default when the selected `codex` is the Homebrew cask, else
+`codex update`), then probes `--version`, `--help`, and `completion zsh`, each with its own
+bounded timeout. If the updater fails or hangs, or the candidate fails a probe, it restores the
+last known good binary (including the original symlink chain) and reports what failed. A
+`codex` that is already unhealthy is refused, never "updated".
+
+```bash
+harness codex update                                  # update Codex safely; roll back on a hung candidate
+harness codex update -- brew reinstall --cask codex   # replace the default updater command
+```
+
+- `--path` — the codex binary (default: first `codex` on PATH).
+- `--backup-dir` — where last-known-good binaries go (default: `$HARNESS_CODEX_BACKUP_DIR`,
+  else `$XDG_STATE_HOME/harness-cli/codex-backups`, else
+  `~/.local/state/harness-cli/codex-backups`).
+- `--probe-timeout` — seconds per probe (default 5). The updater run itself is bounded by
+  `$HARNESS_CODEX_UPDATE_TIMEOUT_S` (default 600).
+- Exit codes: `0` updated, `2` invalid `--probe-timeout`, `8` update failed (rolled back, or
+  rollback needs attention), `127` codex or the updater command is missing.
+
+This command used to be `rig codex update` (rig-cli). Backups made before the move are under
+`~/.cache/rig/codex-backups`, and the updater timeout variable was
+`RIG_CODEX_UPDATE_TIMEOUT_S`; harness-cli reads neither.
 
 ## Data sources (real % only)
 
@@ -146,6 +175,8 @@ On macOS the Keychain token is preferred when `~/.claude/.credentials.json` is s
 - `harness_cli/omp_acp.py` — omp ACP JSON-RPC client (NDJSON framing over `omp acp`
   stdio); the one real `KIND_HANDLERS` implementation.
 - `harness_cli/agents_web.py` — local live landscape web view (ThreadingHTTPServer + SSE).
+- `harness_cli/codex_update.py` — `codex update`: backup, bounded updater run,
+  version/help/completion probes, and rollback to the last known good binary.
 - `harness_cli/stats.py` — `stats` command: review/fix iteration counts (`gh`),
   follow-up chains (`task`), and best-effort transcript token usage (reuses
   `harness_cli/search.py` + `harness_cli/transcripts.py`); subprocess work is

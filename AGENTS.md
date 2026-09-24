@@ -12,7 +12,9 @@ concern from `limits`, sharing only this repo's fail-closed discipline and
 its existing transcript-search machinery. It is a peer to `task-cli` /
 `tg-cli` / `review-cli` / `dev-cli` (each a standalone repo under
 `alex-mextner`) and shells out (read-only) to task-cli's `task` binary and to
-`gh` for `stats`'s own data.
+`gh` for `stats`'s own data. `harness codex update` updates the Codex binary
+safely (backup, bounded probes, rollback to the last known good binary); it moved
+here from rig-cli, which only reconciles the dev environment.
 
 See `README.md` for data sources and fail-closed rules.
 
@@ -25,7 +27,7 @@ See `README.md` for data sources and fail-closed rules.
 - **Stdlib-only at import time.** `harness_cli/cli.py`'s `build_parser()` and
   module import must succeed with zero third-party imports. Heavy/network/subprocess
   work is imported lazily inside `_run_limits` / `_run_search` / `_run_tasks` /
-  `_run_agents` / `_run_nudge` / `_run_stats`.
+  `_run_agents` / `_run_nudge` / `_run_stats` / `_run_codex`.
 - **Fail closed.** Missing creds, 401/403/429, or no usage endpoint → a card
   with a reason, empty windows, no bar, no fake `% used`.
 - Transcript modules stay; do not delete them. They must not feed `limits`.
