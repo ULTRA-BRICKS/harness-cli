@@ -22,8 +22,8 @@ test = ["pytest"]
 [project.scripts]
 harness = "harness_cli.cli:main"
 
-# No [project.urls] Homepage yet - this repo has no GitHub remote (see README.md's
-# "Status" section); add it once one exists rather than shipping a dangling link.
+[project.urls]
+Homepage = "https://git.hyperide.ai/ultrabricks/harness-cli"
 
 [tool.setuptools.packages.find]
 include = ["harness_cli*"]

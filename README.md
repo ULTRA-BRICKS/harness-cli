@@ -22,6 +22,30 @@ Missing credentials or a missing usage endpoint fail closed (`missing credential
 — not guessed from tokens` / `no usage endpoint — not guessed from tokens`) instead
 of inventing a number.
 
+## Install
+
+Pick one — each ends with `harness` on your PATH:
+
+```bash
+# 1. uv — recommended; macOS, Linux and Windows (incl. Cygwin / Git Bash)
+uv tool install git+https://git.hyperide.ai/ultrabricks/harness-cli
+
+# 2. pipx
+pipx install git+https://git.hyperide.ai/ultrabricks/harness-cli
+
+# 3. from a clone — to hack on it; `git pull` updates the installed tool
+git clone https://git.hyperide.ai/ultrabricks/harness-cli && cd harness-cli && uv tool install --editable .
+```
+
+- **Update:** `uv tool upgrade harness-cli` · `pipx upgrade harness-cli` · `git pull`.
+- **Windows:** use uv (option 1). If a command dies with `UnicodeEncodeError` in mintty, run `setx PYTHONUTF8 1` once. More: [rig-cli → Windows](https://git.hyperide.ai/ultrabricks/rig-cli#windows-cygwin-git-bash-powershell).
+
+> **Not on PyPI — always install from the git URL.** A bare `pipx install harness-cli` /
+> `uv tool install harness-cli` does not install this tool: the name is unclaimed on PyPI or (for
+> `rig-cli`, `dev-cli`, `harness-cli`) belongs to an unrelated project. The canonical repo is
+> **git.hyperide.ai/ultrabricks/harness-cli**; `github.com/alex-mextner/harness-cli` is a frozen,
+> archived mirror.
+
 ## Commands
 
 ```
