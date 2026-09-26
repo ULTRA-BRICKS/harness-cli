@@ -39,6 +39,7 @@ git clone https://git.hyperide.ai/ultrabricks/harness-cli && cd harness-cli && u
 
 - **Unreleased `main`:** `uv tool install git+https://git.hyperide.ai/ultrabricks/harness-cli` (or the same with `pipx install`).
 - **Update:** `uv tool upgrade hyper-harness` · `pipx upgrade hyper-harness` · `git pull`.
+- **Installed before the rename** (as `harness-cli`, from git)? Remove that first — `uv tool uninstall harness-cli` or `pipx uninstall harness-cli` — or two installs both claim `harness`.
 - **Windows:** use uv (option 1). If a command dies with `UnicodeEncodeError` in mintty, run `setx PYTHONUTF8 1` once. More: [rig-cli → Windows](https://git.hyperide.ai/ultrabricks/rig-cli#windows-cygwin-git-bash-powershell).
 
 > **On PyPI as `hyper-harness`** (the command is still `harness`). `harness-cli` on PyPI is an unrelated project — `pipx install harness-cli` would install that. The canonical repo is
