@@ -186,6 +186,7 @@ def _add_codex_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParse
         epilog=(
             "exit codes:\n  0 success\n  2 invalid --probe-timeout\n"
             "  8 Codex update failed (rolled back, or rollback needs attention)\n"
+            "  126 updater command exists but can't be run (not executable)\n"
             "  127 Codex binary or updater command missing"
         ),
     )
@@ -226,7 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
             "transcript token counts."
         ),
     )
-    parser.add_argument("--version", action="version", version=f"harness-cli {__version__}")
+    parser.add_argument("--version", action="version", version=f"harness {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     limits = sub.add_parser(

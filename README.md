@@ -132,7 +132,8 @@ harness codex update -- brew reinstall --cask codex   # replace the default upda
 - `--probe-timeout` — seconds per probe (default 5). The updater run itself is bounded by
   `$HARNESS_CODEX_UPDATE_TIMEOUT_S` (default 600).
 - Exit codes: `0` updated, `2` invalid `--probe-timeout`, `8` update failed (rolled back, or
-  rollback needs attention), `127` codex or the updater command is missing.
+  rollback needs attention), `126` the updater exists but can't be run, `127` codex or the
+  updater command is missing.
 
 This command used to be `rig codex update` (rig-cli). Backups made before the move are under
 `~/.cache/rig/codex-backups`, and the updater timeout variable was

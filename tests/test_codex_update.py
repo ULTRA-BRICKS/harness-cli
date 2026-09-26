@@ -717,3 +717,88 @@ def test_default_codex_update_command_handles_intel_homebrew_symlink(tmp_path, m
 
     expected = [str(brew_link), "upgrade", "--cask", "codex"]
     assert codex_update.default_update_command(codex) == expected
+
+
+# ── review of harness-cli#44: rollback must survive odd output, hangs and interrupts ───────────
+
+
+def _live_good(tmp_path: Path) -> tuple[Path, Path]:
+    good = tmp_path / "codex-good"
+    live = tmp_path / "bin" / "codex"
+    live.parent.mkdir()
+    _write_fake_codex(good, "0.142.4")
+    live.symlink_to(good)
+    return good, live
+
+
+@posix_only
+def test_undecodable_candidate_output_still_probes_and_never_raises(tmp_path):
+    codex = tmp_path / "codex"
+    codex.write_bytes(b"#!/bin/sh\nprintf 'codex-cli 1.0 \\377\\376\\n'\n")  # not valid UTF-8
+    codex.chmod(0o755)
+    res = codex_update.run_bounded([str(codex), "--version"], timeout_s=_PROBE_TIMEOUT_S)
+    assert res.returncode == 0 and res.stdout.startswith("codex-cli 1.0 ")
+
+
+@posix_only
+def test_version_comes_from_stdout_not_stderr(tmp_path):
+    codex = tmp_path / "codex"
+    codex.write_text(
+        "#!/bin/sh\n"
+        "case \"${1:-}\" in\n"
+        "  --version) printf 'codex-cli 0.150.0'; echo 'warning: update available' >&2 ;;\n"
+        "  *) echo ok ;;\n"
+        "esac\n"
+    )
+    codex.chmod(0o755)
+    assert codex_update.probe_codex(codex, timeout_s=_PROBE_TIMEOUT_S).version == "codex-cli 0.150.0"
+
+
+@posix_only
+def test_hanging_updater_is_killed_and_rolled_back(tmp_path, monkeypatch):
+    good, live = _live_good(tmp_path)
+    monkeypatch.setenv("HARNESS_CODEX_UPDATE_TIMEOUT_S", "1")
+    update = _write_update_script(tmp_path / "hang.sh", f"rm -f {live}\nsleep 30\n")
+
+    result = _update(live, update, tmp_path / "backups")
+
+    assert result.status == "rolled_back", result.message
+    assert "update command timed out after 1s" in result.message
+    assert live.resolve() == good and _healthy(live)
+
+
+@pytest.mark.parametrize("raw,want", [(None, 600.0), ("abc", 600.0), ("0", 600.0), ("-3", 600.0),
+                                      ("inf", 600.0), ("2.5", 2.5)])
+def test_update_timeout_env_parsing(monkeypatch, raw, want):
+    if raw is not None:
+        monkeypatch.setenv("HARNESS_CODEX_UPDATE_TIMEOUT_S", raw)
+    assert codex_update._update_timeout_s() == want
+
+
+@posix_only
+def test_interrupt_during_update_restores_the_backup(tmp_path, monkeypatch):
+    good, live = _live_good(tmp_path)
+    update = _write_update_script(tmp_path / "noop.sh", "exit 0\n")
+    real = codex_update.run_bounded
+
+    def interrupted(cmd, *, timeout_s):
+        if cmd == [str(update)]:
+            live.unlink()  # the updater got as far as removing the old binary...
+            raise KeyboardInterrupt  # ...when the user hit Ctrl-C
+        return real(cmd, timeout_s=timeout_s)
+
+    monkeypatch.setattr(codex_update, "run_bounded", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        _update(live, update, tmp_path / "backups")
+    assert live.resolve() == good and _healthy(live)
+
+
+@posix_only
+def test_updater_that_is_not_executable_exits_126(tmp_path):
+    _good, live = _live_good(tmp_path)
+    update = tmp_path / "update.sh"
+    update.write_text("#!/bin/sh\nexit 0\n")  # no +x
+
+    result = _update(live, update, tmp_path / "backups")
+
+    assert result.status == "rolled_back" and result.exit_code == codex_update.EXIT_NOT_EXECUTABLE

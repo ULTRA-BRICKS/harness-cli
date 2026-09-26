@@ -42,6 +42,7 @@ DEFAULT_UPDATE_TIMEOUT_S = 600.0
 EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_UPDATE_FAILED = 8
+EXIT_NOT_EXECUTABLE = 126
 EXIT_MISSING = 127
 
 
@@ -149,7 +150,7 @@ def probe_codex(
         if not output:
             return ProbeResult(False, version, f"{step.name} probe produced no output")
         if step.name == "version":
-            version = output.splitlines()[0].strip()
+            version = (res.stdout.strip() or output).splitlines()[0].strip()
     return ProbeResult(True, version, f"probes passed ({version or 'version unknown'})")
 
 
@@ -182,6 +183,26 @@ def safe_update(
     except OSError as exc:
         return UpdateResult("error", f"could not back up current codex: {exc}")
     command = update_command or default_update_command(path)
+    try:
+        return _update_from_snapshot(path, snapshot, before, command, probe_timeout_s)
+    except BaseException:
+        # Ctrl-C (the updater runs in its own session, so it keeps going), or a bug: never leave
+        # the machine on an unverified candidate while a good backup sits on disk.
+        try:
+            restore_snapshot(snapshot)
+        except Exception:  # noqa: BLE001 — the original error is the one to surface
+            pass
+        raise
+
+
+def _update_from_snapshot(
+    path: Path,
+    snapshot: CodexSnapshot,
+    before: ProbeResult,
+    command: list[str],
+    probe_timeout_s: float,
+) -> UpdateResult:
+    """Run the updater and probe the candidate; roll back to ``snapshot`` when either fails."""
     update_timeout_s = _update_timeout_s()
     update = run_bounded(command, timeout_s=update_timeout_s)
     rollback_reason: str | None = None
@@ -190,8 +211,8 @@ def safe_update(
         rollback_reason = f"update command timed out after {update_timeout_s:g}s"
     elif update.returncode != 0:
         rollback_reason = f"update command exited {update.returncode}: {_tail(update.combined)}"
-        if update.returncode == EXIT_MISSING:
-            exit_code = EXIT_MISSING
+        if update.returncode in (EXIT_MISSING, EXIT_NOT_EXECUTABLE):
+            exit_code = update.returncode
     if rollback_reason is not None:
         return _rollback_result(
             rollback_reason,
@@ -301,11 +322,16 @@ def run_bounded(cmd: list[str], *, timeout_s: float) -> CommandResult:
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            # Lenient decoding: an updater or candidate that prints a byte the locale can't decode
+            # (a UTF-8 spinner under LANG=C, cp1252 on Windows) must not raise past the rollback.
+            encoding="utf-8",
+            errors="replace",
             start_new_session=True,
         )
-    except OSError as exc:
+    except FileNotFoundError as exc:
         return CommandResult(EXIT_MISSING, "", str(exc))
+    except OSError as exc:  # exists but can't be run (not executable, bad interpreter)
+        return CommandResult(EXIT_NOT_EXECUTABLE, "", str(exc))
     try:
         out, err = proc.communicate(timeout=timeout_s)
         return CommandResult(proc.returncode, out or "", err or "")
