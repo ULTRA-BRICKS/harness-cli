@@ -31,6 +31,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -190,8 +191,9 @@ def safe_update(
         # the machine on an unverified candidate while a good backup sits on disk.
         try:
             restore_snapshot(snapshot)
-        except Exception:  # noqa: BLE001 — the original error is the one to surface
-            pass
+        except Exception as restore_error:  # noqa: BLE001 — surface the original error
+            print(f"harness codex update: restoring the backup also failed: {restore_error}",
+                  file=sys.stderr)
         raise
 
 

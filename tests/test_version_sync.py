@@ -15,8 +15,8 @@ PYPROJECT = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_tex
 
 
 def _project_field(name: str) -> str:
-    table = re.search(r"^\[project\]\s*$(.*?)(?=^\[|\Z)", PYPROJECT, re.M | re.S).group(1)
-    return re.search(rf'^{name}\s*=\s*"([^"]+)"', table, re.M).group(1)
+    table = re.search(r"^\[project\]\s*$(.*?)(?=^\[|\Z)", PYPROJECT, re.MULTILINE | re.DOTALL).group(1)
+    return re.search(rf'^{name}\s*=\s*"([^"]+)"', table, re.MULTILINE).group(1)
 
 
 def test_package_version_matches_pyproject() -> None:

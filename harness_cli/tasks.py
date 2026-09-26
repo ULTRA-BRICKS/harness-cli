@@ -324,7 +324,7 @@ def import_tickets(items: list[dict]) -> dict:
     """
     for index, item in enumerate(items):
         if not isinstance(item, dict):
-            raise ValueError(
+            raise ValueError(  # noqa: TRY004 — callers report bad import payloads as ValueError
                 f"import item {index} must be a JSON object, got {type(item).__name__}"
             )
         _validate_import_item(index, item)
