@@ -522,7 +522,7 @@ def test_all_mode_falls_back_when_bulk_pr_fetch_times_out(tmp_path, monkeypatch)
     }
     _dispatcher(monkeypatch, responses)
 
-    results, summary, reason = stats.build_all_stats(repo)
+    results, _summary, reason = stats.build_all_stats(repo)
 
     assert reason is None
     assert len(results) == 1

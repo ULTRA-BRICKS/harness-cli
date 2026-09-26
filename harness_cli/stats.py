@@ -101,8 +101,7 @@ def _parse_git_remote_url(url: str) -> str | None:
     `origin` may point at GitHub, a Forgejo host, or anything else - only the trailing two path
     segments matter)."""
     cleaned = url.strip()
-    if cleaned.endswith(".git"):
-        cleaned = cleaned[: -len(".git")]
+    cleaned = cleaned.removesuffix(".git")
     if cleaned.startswith("git@") and ":" in cleaned:
         path = cleaned.split(":", 1)[1]
     elif "://" in cleaned:
@@ -124,6 +123,7 @@ def _git_remote_repo(cwd: Path) -> str | None:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -176,7 +176,7 @@ def _run_json(cmd: list[str], timeout: float = 20.0) -> tuple[object | None, str
     binary = cmd[0]
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, errors="replace"
+            cmd, capture_output=True, text=True, timeout=timeout, errors="replace", check=False
         )
     except FileNotFoundError:
         return None, f"`{binary}` not found on PATH"

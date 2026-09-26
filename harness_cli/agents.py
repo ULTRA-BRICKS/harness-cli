@@ -56,7 +56,7 @@ _SECRET_RES = (
     re.compile(r"\bglpat-[A-Za-z0-9_\-]{10,}"),
     re.compile(r"\beyJ[A-Za-z0-9_\-]+=*\.[A-Za-z0-9_\-]+=*\.[A-Za-z0-9_\-]+=*"),
 )
-_last_text_cache: dict[tuple[str, float], str] = {}
+_last_text_cache: dict[tuple[str, int, int], str] = {}
 
 
 def questions_dir() -> Path:
@@ -134,10 +134,14 @@ def _finish_last_text(snippet: str) -> str:
 
 
 def _last_text(path: Path) -> str:
-    mtime = discovery._safe_mtime(path)
-    if mtime is None:
+    try:
+        st = path.stat()
+    except OSError:
         return ""
-    key = (str(path), mtime)
+    # mtime alone served a stale snippet when the transcript changed twice inside one
+    # timestamp tick (coarse on some filesystems, e.g. the CI runner's). Transcripts only
+    # grow, so the size moves with every append even when the mtime does not.
+    key = (str(path), st.st_mtime_ns, st.st_size)
     cached = _last_text_cache.get(key)
     if cached is not None:
         return cached

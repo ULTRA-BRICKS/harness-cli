@@ -170,6 +170,53 @@ def _add_stats_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParse
     return stats
 
 
+def _add_codex_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    codex = sub.add_parser("codex", help="Safe Codex maintenance helpers.")
+    codex_sub = codex.add_subparsers(dest="codex_command", metavar="<update>")
+    update = codex_sub.add_parser(
+        "update",
+        help="Update Codex, then roll back if version/help/completion probes fail or hang.",
+        description=(
+            "Back up the working codex, run the updater (brew upgrade --cask codex when the\n"
+            "selected codex is the Homebrew cask, else `codex update`), probe --version, --help\n"
+            "and `completion zsh` with bounded timeouts, and restore the last known good binary\n"
+            "if the updater or the candidate fails or hangs."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "exit codes:\n  0 success\n  2 invalid --probe-timeout\n"
+            "  8 Codex update failed (rolled back, or rollback needs attention)\n"
+            "  126 updater command exists but can't be run (not executable)\n"
+            "  127 Codex binary or updater command missing"
+        ),
+    )
+    update.add_argument("--path", help="Path to the codex binary (default: first codex on PATH).")
+    update.add_argument(
+        "--backup-dir",
+        default=None,
+        help=(
+            "Where to store last-known-good binary backups (default: $HARNESS_CODEX_BACKUP_DIR, "
+            "else $XDG_STATE_HOME/harness-cli/codex-backups, "
+            "else ~/.local/state/harness-cli/codex-backups)."
+        ),
+    )
+    update.add_argument(
+        "--probe-timeout",
+        type=float,
+        default=None,
+        help="Seconds for each version/help/completion probe (default: 5).",
+    )
+    update.add_argument(
+        "update_command",
+        nargs=argparse.REMAINDER,
+        help=(
+            "Optional updater command after -- "
+            "(default: brew upgrade --cask codex for Homebrew codex)."
+        ),
+    )
+    return codex
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness",
@@ -180,7 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
             "transcript token counts."
         ),
     )
-    parser.add_argument("--version", action="version", version=f"harness-cli {__version__}")
+    parser.add_argument("--version", action="version", version=f"harness {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     limits = sub.add_parser(
@@ -231,6 +278,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.agents_parser = _add_agents_parser(sub)
     parser.nudge_parser = _add_nudge_parser(sub)
     parser.stats_parser = _add_stats_parser(sub)
+    parser.codex_parser = _add_codex_parser(sub)
     return parser
 
 
@@ -257,6 +305,11 @@ def main(argv: list[str] | None = None) -> int:
         return _run_nudge(args)
     if args.command == "stats":
         return _run_stats(args)
+    if args.command == "codex":
+        if getattr(args, "codex_command", None) is None:
+            parser.codex_parser.print_help()
+            return 0
+        return _run_codex(args)
 
     parser.print_help()
     return 1
@@ -303,6 +356,14 @@ def _run_stats(args: argparse.Namespace) -> int:
     # Imported lazily: keep `harness --help` / `harness --version` on the stdlib-only
     # fast path, matching _run_limits / _run_search / _run_tasks / _run_agents / _run_nudge.
     from harness_cli.stats import run
+
+    return run(args)
+
+
+def _run_codex(args: argparse.Namespace) -> int:
+    # Imported lazily: keep `harness --help` / `harness --version` on the stdlib-only
+    # fast path, matching the other `_run_*` dispatchers.
+    from harness_cli.codex_update import run
 
     return run(args)
 

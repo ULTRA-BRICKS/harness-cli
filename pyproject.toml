@@ -3,8 +3,8 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "harness-cli"
-version = "0.6.0"
+name = "hyper-harness"
+version = "0.7.0"
 description = "Real rate-limit proximity (percent used, reset, pace) for Claude Code, Codex, z.ai, x.ai, and kimi accounts on this machine."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -22,8 +22,8 @@ test = ["pytest"]
 [project.scripts]
 harness = "harness_cli.cli:main"
 
-# No [project.urls] Homepage yet - this repo has no GitHub remote (see README.md's
-# "Status" section); add it once one exists rather than shipping a dangling link.
+[project.urls]
+Homepage = "https://git.hyperide.ai/ultrabricks/harness-cli"
 
 [tool.setuptools.packages.find]
 include = ["harness_cli*"]
