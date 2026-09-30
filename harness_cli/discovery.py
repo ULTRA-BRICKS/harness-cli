@@ -1,10 +1,10 @@
 """Locate Claude Code account config dirs and transcript files on disk.
 
 Stdlib-only. Two account layouts coexist on this machine (and are handled generically,
-not hard-coded to one machine): a stock single-account `~/.claude`, and a rotated
-multi-account `~/.claude-accounts/account-*` layout (each with its own `projects/`).
-`$CLAUDE_CONFIG_DIR` (set by Claude Code / claude-rotate for the running session) always
-takes priority for "current session" resolution.
+not hard-coded to one machine): a stock single-account `~/.claude`, and a multi-account
+`~/.claude-accounts/account-*` layout (each with its own `projects/`). `$CLAUDE_CONFIG_DIR`
+(set for the running Claude Code session) always takes priority for "current session"
+resolution.
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ def slugify_cwd(cwd: str) -> str:
 def discover_account_dirs(home: Path | None = None) -> list[Path]:
     """Return every Claude Code config dir on this machine that has a `projects/` subdir.
 
-    Includes `~/.claude` (stock layout) and every `~/.claude-accounts/account-*` (rotated
+    Includes `~/.claude` (stock layout) and every `~/.claude-accounts/account-*` (multi-account
     layout), deduplicated by resolved path. Order: `~/.claude` first, then accounts sorted
     by name.
     """

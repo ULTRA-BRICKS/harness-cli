@@ -10,7 +10,7 @@ def test_slugify_cwd_matches_observed_convention():
     assert discovery.slugify_cwd("/Users/ultra/xp/rig-cli") == "-Users-ultra-xp-rig-cli"
 
 
-def test_discover_account_dirs_finds_stock_and_rotated_layouts(tmp_path):
+def test_discover_account_dirs_finds_stock_and_multi_account_layouts(tmp_path):
     (tmp_path / ".claude" / "projects").mkdir(parents=True)
     (tmp_path / ".claude-accounts" / "account-0" / "projects").mkdir(parents=True)
     (tmp_path / ".claude-accounts" / "account-1" / "projects").mkdir(parents=True)
