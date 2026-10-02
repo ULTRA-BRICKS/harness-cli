@@ -32,6 +32,14 @@ See `README.md` for data sources and fail-closed rules.
 - Add a test with every behavior change. TDD red-first is the house style.
 - Function length target ~50 lines, hard ceiling ~80 — decompose before it grows past that.
 
+## Remotes & PRs
+
+- Canonical remote is Forgejo (`origin`, `git.hyperide.ai/ultrabricks/harness-cli`).
+  The `github` remote is a legacy, archived, read-only mirror — never push or open PRs there.
+- Use the `fj` CLI (not `gh`) for PR creation/merging against `origin`. `gh` has no
+  host config for the Forgejo instance and will silently target the archived GitHub
+  mirror instead, producing a misleading "repository archived" error.
+
 ## Tests
 
 - `python -m pytest -q` — hermetic unit suite. Every test that touches the
