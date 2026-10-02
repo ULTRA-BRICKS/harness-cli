@@ -5,6 +5,8 @@ import json
 import os
 import stat
 import subprocess
+import threading
+import time
 import urllib.request
 
 import pytest
@@ -539,6 +541,10 @@ def test_tasks_import_raises_if_ticket_vanishes_between_scan_and_write(
 
     with pytest.raises(RuntimeError, match="vanished during import"):
         tasks.import_tickets([item])
+    # The lock is acquired before the dedup scan/write and must still be released
+    # on this failure path (the try/finally's only untested leg) - otherwise every
+    # subsequent import would wrongly report "another import in progress".
+    assert not (store / tasks._IMPORT_LOCK_NAME).exists()
 
 
 def test_grooming_fields_match_create_ticket_signature():
@@ -631,3 +637,123 @@ def test_tasks_import_missing_title_on_update_does_not_blank_existing_title(
     assert rc == 1
     ticket = tasks.list_tickets(include_done=True)[0]
     assert ticket["title"] == "keep me"
+
+
+def test_import_blocked_by_existing_lock_raises_clear_error(tmp_path, monkeypatch, capsys):
+    """A live import lock (another run holding it) fails the CLI import loudly
+    with a clear "in progress" message instead of racing past the lock file."""
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+    store.mkdir(parents=True, exist_ok=True)
+    (store / tasks._IMPORT_LOCK_NAME).touch()
+    monkeypatch.setattr(tasks, "_IMPORT_LOCK_TIMEOUT", 0.05)
+    monkeypatch.setattr(tasks, "_IMPORT_LOCK_POLL", 0.01)
+
+    import_path = tmp_path / "import.json"
+    import_path.write_text(json.dumps([{"title": "blocked by lock"}]), encoding="utf-8")
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "in progress" in captured.err
+    assert tasks.list_tickets(include_done=True) == []
+
+
+def test_import_releases_lock_after_success(tmp_path, monkeypatch, capsys):
+    """The lock file must not linger after a clean import - a leaked lock would
+    block every subsequent import until someone manually removes it."""
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    import_path = tmp_path / "import.json"
+    import_path.write_text(json.dumps([{"title": "clean run"}]), encoding="utf-8")
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    capsys.readouterr()
+    assert rc == 0
+    assert not (store / tasks._IMPORT_LOCK_NAME).exists()
+
+
+def test_import_reclaims_stale_lock(tmp_path, monkeypatch, capsys):
+    """A lock file older than _IMPORT_LOCK_STALE_AFTER is reclaimed instead of
+    blocking forever - covers a prior run that crashed before its `finally`
+    cleanup ran."""
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+    store.mkdir(parents=True, exist_ok=True)
+    lock_path = store / tasks._IMPORT_LOCK_NAME
+    lock_path.touch()
+    stale_mtime = time.time() - 3600  # 1 hour old: well past any staleness threshold
+    os.utime(lock_path, (stale_mtime, stale_mtime))
+    monkeypatch.setattr(tasks, "_IMPORT_LOCK_STALE_AFTER", 1.0)
+
+    import_path = tmp_path / "import.json"
+    import_path.write_text(json.dumps([{"title": "reclaims stale lock"}]), encoding="utf-8")
+
+    rc = cli.main(["tasks", "import", str(import_path)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "1 created, 0 updated, of 1 total" in out
+    assert not lock_path.exists()
+
+
+def test_concurrent_imports_same_key_never_double_create(tmp_path, monkeypatch):
+    """Proves `_acquire_import_lock` actually serializes real concurrent
+    `import_tickets` calls targeting the same (source, external_id) key.
+
+    The three lock tests above only *simulate* lock state - they pre-touch or
+    age a lock file on disk and then run a single import against it. None of
+    them ever has two imports executing at the same time, so none would catch
+    a lock whose acquire path has a TOCTOU bug (e.g. checking-then-creating
+    the lock file non-atomically): the store would still end up correct
+    because only one import ever actually runs per test. This test instead
+    starts `thread_count` real threads, releases them at the same instant via
+    a Barrier so they all race into `_acquire_import_lock` together, and
+    asserts the store ends up with exactly one ticket for the shared key -
+    proving the lock, not luck, is what prevents the duplicate.
+    """
+    store = tmp_path / "tasks"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HARNESS_TASK_DIR", str(store))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    thread_count = 8
+    barrier = threading.Barrier(thread_count)
+    item = [{"title": "race", "source": "grooming-v4", "external_id": "v4-race"}]
+    results: list[dict] = []
+    errors: list[BaseException] = []
+    results_lock = threading.Lock()
+
+    def worker() -> None:
+        barrier.wait()
+        try:
+            summary = tasks.import_tickets(item)
+        except BaseException as exc:  # noqa: BLE001 - captured for the assertion below
+            with results_lock:
+                errors.append(exc)
+        else:
+            with results_lock:
+                results.append(summary)
+
+    threads = [threading.Thread(target=worker) for _ in range(thread_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert errors == []
+    assert len(results) == thread_count
+    assert sum(result["created"] for result in results) == 1
+    assert sum(result["updated"] for result in results) == thread_count - 1
+    matching = [
+        ticket
+        for ticket in tasks.list_tickets(include_done=True)
+        if ticket.get("external_id") == "v4-race"
+    ]
+    assert len(matching) == 1

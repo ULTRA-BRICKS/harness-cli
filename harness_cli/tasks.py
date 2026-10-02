@@ -20,6 +20,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -227,7 +228,7 @@ def create_ticket(
             continue
         return ticket
     raise RuntimeError(
-        f"could not reserve a harness task id after {_MAX_CREATE_ATTEMPTS} attempts "
+        f"could not reserve a harness ticket id after {_MAX_CREATE_ATTEMPTS} attempts "
         "(concurrent `tasks new` collision)"
     ) from last_error
 
@@ -299,6 +300,111 @@ def _update_ticket(ticket_id: int, item: dict) -> dict | None:
     return payload
 
 
+_IMPORT_LOCK_NAME = ".import.lock"
+_IMPORT_LOCK_TIMEOUT = 30.0
+_IMPORT_LOCK_POLL = 0.1
+# A lock file older than this is treated as abandoned (the holder crashed or
+# was killed without reaching the `finally` cleanup -- routine in this
+# ecosystem's detached-agent workflow) and reclaimed rather than waited out
+# forever. Comfortably above any realistic import duration on a local store.
+_IMPORT_LOCK_STALE_AFTER = 300.0
+
+
+def _acquire_import_lock(store: Path) -> tuple[Path, bytes]:
+    """Exclusively claim `store`'s import lock file, waiting up to `_IMPORT_LOCK_TIMEOUT`.
+
+    `import_tickets` builds its (source, external_id) dedup index once, then
+    upserts every item against that snapshot. Without a store-wide lock, two
+    concurrent `tasks import` runs both see a given (source, external_id) as
+    absent, both call `create_ticket` for it, and both succeed (exclusive
+    ticket-id creation only guarantees *id* uniqueness, not *key*
+    uniqueness) -- silently breaking the documented "re-running is a no-op"
+    guarantee with a duplicate ticket. Serializing the whole import behind
+    one lock file closes that window; a run that can't acquire the lock
+    within `_IMPORT_LOCK_TIMEOUT` fails loudly instead of racing.
+
+    A lock file older than `_IMPORT_LOCK_STALE_AFTER` is reclaimed rather
+    than waited out forever (the holder likely crashed without reaching the
+    `finally` cleanup). Reclaiming never blindly `unlink`s the file a
+    concurrent reclaimer might have just replaced: it `os.rename`s the stale
+    path to a PID-unique name first. POSIX rename on a given source path
+    only ever succeeds for one caller -- once it succeeds the source name no
+    longer exists, so a second process racing the same reclaim gets
+    `FileNotFoundError` and does nothing further, instead of deleting a lock
+    a third process already re-created in the meantime. A rename failure that
+    is NOT "someone beat us to it" (e.g. the store became read-only) falls
+    through to the same deadline check and backoff sleep as any other
+    contended attempt, instead of retrying in a tight loop forever.
+
+    Returns `(lock_path, token)`. `token` is written into the lock file's
+    contents and must be handed to `_release_import_lock`, which only
+    unlinks the file if its contents still match. Without this, a holder
+    whose lock gets reclaimed as stale while it is still legitimately
+    running (a slow import, or a suspended machine ageing the mtime with no
+    work actually done) would delete the *new* owner's lock in its own
+    `finally`, reopening the exact duplicate-ticket race this function
+    exists to close.
+    """
+    lock_path = store / _IMPORT_LOCK_NAME
+    deadline = time.monotonic() + _IMPORT_LOCK_TIMEOUT
+    while True:
+        token = f"{os.getpid()}:{time.monotonic_ns()}".encode("ascii")
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            try:
+                os.write(fd, token)
+            finally:
+                os.close(fd)
+            return lock_path, token
+        except FileExistsError:
+            try:
+                age = time.time() - lock_path.stat().st_mtime
+            except OSError:
+                age = 0.0  # lock vanished between the failed create and stat; just retry
+            reclaimed = False
+            if age > _IMPORT_LOCK_STALE_AFTER:
+                reclaim_path = (
+                    store / f"{_IMPORT_LOCK_NAME}.reclaim-{os.getpid()}-{time.monotonic_ns()}"
+                )
+                try:
+                    os.rename(lock_path, reclaim_path)
+                except OSError:
+                    pass  # another process already reclaimed or refreshed it; fall through
+                else:
+                    try:
+                        reclaim_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass  # e.g. a directory somehow at that path; harmless leftover clutter
+                    reclaimed = True
+            if reclaimed:
+                continue
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"another `tasks import` appears to be in progress ({lock_path} exists); "
+                    "remove it manually if a previous run crashed without cleaning up"
+                ) from None
+            time.sleep(_IMPORT_LOCK_POLL)
+
+
+def _release_import_lock(lock_path: Path, token: bytes) -> None:
+    """Release `lock_path` only if it still holds this process's `token`.
+
+    A lock reclaimed out from under us as stale (see `_acquire_import_lock`)
+    now belongs to a different owner; unconditionally unlinking `lock_path`
+    here would delete that owner's live lock and reopen the exact
+    duplicate-ticket race the locking mechanism exists to close. Comparing
+    content before unlinking makes the release a no-op once we've lost
+    ownership, instead of blindly deleting whatever currently occupies the
+    path.
+    """
+    try:
+        current = lock_path.read_bytes()
+    except OSError:
+        return
+    if current == token:
+        lock_path.unlink(missing_ok=True)
+
+
 def import_tickets(items: list[dict]) -> dict:
     """Idempotently upsert tickets from a list of import records.
 
@@ -317,10 +423,11 @@ def import_tickets(items: list[dict]) -> dict:
 
     An item with a missing `source` or `external_id` has no dedup identity and is
     always created (never upserted) - re-running such a record duplicates it, so
-    every import record MUST carry both. Single-writer assumption: concurrent
-    `import_tickets` calls race on the same in-memory dedup snapshot the way
-    concurrent `tasks new` calls used to race on ticket ids (see the `create_ticket`
-    docstring); this module has no cross-process import lock.
+    every import record MUST carry both.
+
+    The whole run is serialized behind a store-wide lock (see
+    `_acquire_import_lock`) so two concurrent imports can't both decide the
+    same (source, external_id) is absent and create a duplicate ticket.
     """
     for index, item in enumerate(items):
         if not isinstance(item, dict):
@@ -331,41 +438,45 @@ def import_tickets(items: list[dict]) -> dict:
 
     store = task_dir()
     store.mkdir(parents=True, exist_ok=True)
-    index_by_key: dict[tuple[str, str], dict] = {}
-    for ticket in list_tickets(include_done=True):
-        source = ticket.get("source")
-        external_id = ticket.get("external_id")
-        if source is not None and external_id is not None:
-            index_by_key[(source, external_id)] = ticket
+    lock_path, lock_token = _acquire_import_lock(store)
+    try:
+        index_by_key: dict[tuple[str, str], dict] = {}
+        for ticket in list_tickets(include_done=True):
+            source = ticket.get("source")
+            external_id = ticket.get("external_id")
+            if source is not None and external_id is not None:
+                index_by_key[(source, external_id)] = ticket
 
-    created = 0
-    updated = 0
-    for item in items:
-        source = item.get("source")
-        external_id = item.get("external_id")
-        has_key = source is not None and external_id is not None
-        key = (source, external_id) if has_key else None
-        existing = index_by_key.get(key) if key is not None else None
-        if existing is not None:
-            if _update_ticket(existing["id"], item) is None:
-                raise RuntimeError(
-                    f"ticket {existing['id']} (external_id={external_id!r}) vanished "
-                    "during import - its store file was deleted or corrupted between "
-                    "the dedup scan and the write"
+        created = 0
+        updated = 0
+        for item in items:
+            source = item.get("source")
+            external_id = item.get("external_id")
+            has_key = source is not None and external_id is not None
+            key = (source, external_id) if has_key else None
+            existing = index_by_key.get(key) if key is not None else None
+            if existing is not None:
+                if _update_ticket(existing["id"], item) is None:
+                    raise RuntimeError(
+                        f"ticket {existing['id']} (external_id={external_id!r}) vanished "
+                        "during import - its store file was deleted or corrupted between "
+                        "the dedup scan and the write"
+                    )
+                updated += 1
+            else:
+                new_ticket = create_ticket(
+                    item.get("title", ""),
+                    item.get("body", ""),
+                    state=item.get("state", "open"),
+                    source=source,
+                    external_id=external_id,
+                    **{field: item.get(field) for field in _GROOMING_FIELDS},
                 )
-            updated += 1
-        else:
-            new_ticket = create_ticket(
-                item.get("title", ""),
-                item.get("body", ""),
-                state=item.get("state", "open"),
-                source=source,
-                external_id=external_id,
-                **{field: item.get(field) for field in _GROOMING_FIELDS},
-            )
-            if key is not None:
-                index_by_key[key] = new_ticket
-            created += 1
+                if key is not None:
+                    index_by_key[key] = new_ticket
+                created += 1
+    finally:
+        _release_import_lock(lock_path, lock_token)
     return {"created": created, "updated": updated, "total": len(items)}
 
 
@@ -423,7 +534,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
 def _cmd_done(args: argparse.Namespace) -> int:
     ticket_id = args.ticket_id
     if mark_done(ticket_id) is None:
-        print(f"task not found: {ticket_id}", file=sys.stderr)
+        print(f"ticket not found: {ticket_id}", file=sys.stderr)
         return 1
     return 0
 
