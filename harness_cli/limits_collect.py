@@ -12,6 +12,7 @@ from harness_cli.limits_model import LimitCard
 from harness_cli.providers.claude import collect_claude
 from harness_cli.providers.codex import collect_codex
 from harness_cli.providers.kimi import collect_kimi
+from harness_cli.providers.omp import collect_omp
 from harness_cli.providers.xai import collect_xai
 from harness_cli.providers.zai import collect_zai
 
@@ -24,6 +25,7 @@ def collect_all(home: Path | None = None) -> list[LimitCard]:
     cards.append(collect_zai(home))
     cards.append(collect_xai(home))
     cards.append(collect_kimi(home))
+    cards.extend(collect_omp(home))
     return cards
 
 
